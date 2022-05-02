@@ -37,6 +37,10 @@ basedir = os.path.dirname(args.csvfile)
 
 # Make output directory, if needed
 pathlib.Path(outputdir).mkdir(parents=True, exist_ok=True)
+darkpath = os.path.join(outputdir, "darks")
+pathlib.Path(darkpath).mkdir(parents=True, exist_ok=True)
+sciencepath = os.path.join(outputdir, "science")
+pathlib.Path(sciencepath).mkdir(parents=True, exist_ok=True)
 
 togray = False
 coloridx = 0
@@ -79,13 +83,14 @@ if len(darkfiles) > 0:
                     darkaccum = np.zeros(hduList[0].data.shape)
                     dark.append(hduList[0].copy())
                 np.add(darkaccum, hduList[0].data, out=darkaccum)
+                hduList.writeto(os.path.join(darkpath, f), overwrite=True)
         except OSError:
             print("Error: file %s" % f)        
     # Now compute average for each pixel
     darkaccum = darkaccum // len(darkfiles)
     dark[0].data = darkaccum.astype(np.uint16)
     # And write output dark
-    dark.writeto(os.path.join(outputdir, "dark.fits"), overwrite=True)
+    dark.writeto(os.path.join(darkpath, "master=dark.fits"), overwrite=True)
 
 cnt = 0
 for f in lightfiles:
@@ -109,7 +114,7 @@ for f in lightfiles:
                 dst = cv2.cvtColor(hduList[0].data, cv2.COLOR_BayerBG2BGR)
                 for idx, val in enumerate(dst):
                     hduList[0].data[idx] = val[:,coloridx]
-            hduList.writeto(os.path.join(outputdir, f), overwrite=True)
+            hduList.writeto(os.path.join(sciencepath, f), overwrite=True)
             cnt = cnt + 1
     except OSError:
         print("Error: file %s" % f)        
