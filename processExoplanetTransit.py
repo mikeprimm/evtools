@@ -14,25 +14,35 @@ def runsolving(ra, dec, infile, outfile):
         "--ra", str(ra),
         "--dec", str(dec),
         "--radius", "5",
-        "--new-fits", outfile, "--out", tmppath ], 
+        "--new-fits", outfile ], 
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if rslt.returncode != 0:
         print("Error solving %s - skipping" % f)
         return False
     return True
 
-def runstacking(ra, dec, fitsfiles, stackfile): 
+def runstacking(ra, dec, fitsfiles, stackfile, mjdobs, mjdend): 
     print("Stacking %d images into %s" % (len(fitsfiles), stackfile))
     tmpst = os.path.join(tmppath, "tmpstack.fits")
-    stackargs = [ "SWarp", "-IMAGEOUT_NAME", tmpst, "-WRITE_XML", "N" ]
+    stackargs = [ "SWarp", 
+        "-IMAGEOUT_NAME", tmpst, 
+        "-WRITE_XML", "N",
+        "-COPY_KEYWORDS", "OBJECT,ORIGIN,MINSYET,TELESCOP,INSTUME,SERIALNB,TIMEUNIT,LATITUDE,LONGITUD,GAIN,GAINDB,ALTITUDE,CMOSTEMP,OBSMODE,DATE,SOFTVER" ]                              
     stackargs.extend(fitsfiles)
-    rslt = subprocess.run(stackargs,stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    rslt = subprocess.run(stackargs,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     if rslt.returncode != 0:
         print("Error stacking %s" % stackfile)
         return False
     # And resolve new file
-    return runsolving(ra, dec, tmpst, stackfile)
-
+    if runsolving(ra, dec, tmpst, stackfile):
+        # And add MJD fields for stack
+        with fits.open(stackfile) as hduList:
+            hduList[0].header['MJD-OBS'] = mjdobs
+            hduList[0].header['MJD-END'] = mjdend
+            hduList[0].header['MJD-MID'] = (mjdobs + mjdend) / 2
+            hduList.writeto(stackfile, overwrite=True)
+        return True
+    return False
 # Initialize parser
 parser = argparse.ArgumentParser()
 # Add input argument
@@ -46,6 +56,7 @@ parser.add_argument('-b', "--blue", action='store_true')
 parser.add_argument("-G", "--gray", action='store_true')
 # Add number of minutes to stack
 parser.add_argument("--stacktime", help = "Number of mintutes to stack (default 2)") 
+parser.add_argument("--presolve", action='store_true')
 
 # Read arguments from command line
 try:
@@ -91,7 +102,9 @@ elif args.blue:
 else:
     togray = True
     print("Produce grayscale FITS files")
-
+dopresolve = False
+if args.presolve:
+    dopresolve = True
 darkfiles = []
 lightfiles = []
 with open(args.csvfile, newline='') as csvfile:
@@ -133,6 +146,8 @@ timeaccumlist = []
 timeaccumstart = 0
 timeaccumra = 0
 timeaccumdec = 0
+mjdobs = 0
+mjdend = 0
 stackedcnt = 0
 for f in lightfiles:
     try:
@@ -156,13 +171,17 @@ for f in lightfiles:
                 dst = cv2.cvtColor(hduList[0].data, cv2.COLOR_BayerBG2BGR)
                 for idx, val in enumerate(dst):
                     hduList[0].data[idx] = val[:,coloridx]
-            # Write to temporary file so that we can run solve-field to
-            # set WCS data
-            hduList.writeto(os.path.join(tmppath, "tmp.fits"), overwrite=True)
-            # Now run solve-field to generate final file
+            rslt = True
             newfits = os.path.join(sciencepath, f)
-            rslt = runsolving(hduList[0].header['FOVRA'], hduList[0].header['FOVDEC'],
-                os.path.join(tmppath, "tmp.fits"), newfits )
+            if dopresolve:
+                # Write to temporary file so that we can run solve-field to
+                # set WCS data
+                hduList.writeto(os.path.join(tmppath, "tmp.fits"), overwrite=True)
+                # Now run solve-field to generate final file
+                rslt = runsolving(hduList[0].header['FOVRA'], hduList[0].header['FOVDEC'],
+                    os.path.join(tmppath, "tmp.fits"), newfits )
+            else:   # No presolve
+                hduList.writeto(newfits, overwrite=True)
             if rslt == False:
                 print("Error solving %s - skipping" % f)
             else:
@@ -171,16 +190,19 @@ for f in lightfiles:
                 if (len(timeaccumlist) > 0) and ((timeaccumstart + stacktime) < tobs):
                     stackout = os.path.join(stackedpath, "stack-%d.fits" % stackedcnt)
                     tmpout = os.path.join(tmppath, "tmpstack.fits")
-                    runstacking(timeaccumra, timeaccumdec, timeaccumlist, stackout)
+                    runstacking(timeaccumra, timeaccumdec, timeaccumlist, stackout, mjdobs, mjdend)
                     timeaccumlist = []
                     timeaccumstart = 0
                     stackedcnt = stackedcnt + 1
                 else:
-                    if (timeaccumstart == 0):
+                    # If first one to accumulate, save start time and RA/Dec
+                    if (len(timeaccumlist) == 0):
                         timeaccumstart = tobs
                         timeaccumra = hduList[0].header['FOVRA']
                         timeaccumdec = hduList[0].header['FOVDEC']
+                        mjdobs = hduList[0].header['MJD-OBS']
                     timeaccumlist.append(newfits)
+                    mjdend = hduList[0].header['MJD-END']
                 solvedcnt = solvedcnt + 1
             cnt = cnt + 1
     except OSError:
@@ -188,7 +210,7 @@ for f in lightfiles:
 # Final accumulator?
 if len(timeaccumlist) > 0:
     stackout = os.path.join(stackedpath, "stack-%d.fits" % stackedcnt)
-    runstacking(timeaccumra, timeaccumdec, timeaccumlist, stackout)
+    runstacking(timeaccumra, timeaccumdec, timeaccumlist, stackout, mjdobs, mjdend)
     stackedcnt = stackedcnt + 1
 
 print("Processed %d out of %d files and %d stacks into destination '%s'" % (solvedcnt, cnt, stackedcnt, outputdir))
