@@ -166,12 +166,12 @@ for f in lightfiles:
                 np.subtract(hduList[0].data, dark[0].data, out=hduList[0].data)
             # Now debayer into grayscale                
             if togray:
-                dst = cv2.cvtColor(hduList[0].data, cv2.COLOR_BayerGB2GRAY)
+                dst = cv2.cvtColor(hduList[0].data, cv2.COLOR_BayerRG2GRAY)
                 for idx, val in enumerate(dst):
                     hduList[0].data[idx] = val
             else:
                 # Demosaic the image
-                dst = cv2.cvtColor(hduList[0].data, cv2.COLOR_BayerGB2BGR)
+                dst = cv2.cvtColor(hduList[0].data, cv2.COLOR_BayerRG2BGR)
                 for idx, val in enumerate(dst):
                     hduList[0].data[idx] = val[:,coloridx]
             rslt = True
