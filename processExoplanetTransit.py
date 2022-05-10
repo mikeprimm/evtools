@@ -27,9 +27,12 @@ def runstacking(ra, dec, fitsfiles, stackfile, mjdobs, mjdend):
     stackargs = [ "SWarp", 
         "-IMAGEOUT_NAME", tmpst, 
         "-WRITE_XML", "N",
+        "-CENTER_TYPE", "MANUAL",
+        "-CENTER", "%f,%f" % (ra, dec),
+        "-RESAMPLE_DIR", tmppath,
         "-COPY_KEYWORDS", "OBJECT,ORIGIN,MINSYET,TELESCOP,INSTUME,SERIALNB,TIMEUNIT,LATITUDE,LONGITUD,GAIN,GAINDB,ALTITUDE,CMOSTEMP,OBSMODE,DATE,SOFTVER" ]                              
     stackargs.extend(fitsfiles)
-    rslt = subprocess.run(stackargs,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    rslt = subprocess.run(stackargs,stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if rslt.returncode != 0:
         print("Error stacking %s" % stackfile)
         return False
@@ -163,12 +166,12 @@ for f in lightfiles:
                 np.subtract(hduList[0].data, dark[0].data, out=hduList[0].data)
             # Now debayer into grayscale                
             if togray:
-                dst = cv2.cvtColor(hduList[0].data, cv2.COLOR_BayerBG2GRAY)
+                dst = cv2.cvtColor(hduList[0].data, cv2.COLOR_BayerGB2GRAY)
                 for idx, val in enumerate(dst):
                     hduList[0].data[idx] = val
             else:
                 # Demosaic the image
-                dst = cv2.cvtColor(hduList[0].data, cv2.COLOR_BayerBG2BGR)
+                dst = cv2.cvtColor(hduList[0].data, cv2.COLOR_BayerGB2BGR)
                 for idx, val in enumerate(dst):
                     hduList[0].data[idx] = val[:,coloridx]
             rslt = True
@@ -188,7 +191,7 @@ for f in lightfiles:
                 tobs = hduList[0].header['MJD-OBS'] * 24 * 60 # MJD in minutes
                 # End of accumulator?
                 if (len(timeaccumlist) > 0) and ((timeaccumstart + stacktime) < tobs):
-                    stackout = os.path.join(stackedpath, "stack-%d.fits" % stackedcnt)
+                    stackout = os.path.join(stackedpath, "stack-%04d.fits" % stackedcnt)
                     tmpout = os.path.join(tmppath, "tmpstack.fits")
                     runstacking(timeaccumra, timeaccumdec, timeaccumlist, stackout, mjdobs, mjdend)
                     timeaccumlist = []
@@ -209,7 +212,7 @@ for f in lightfiles:
         print("Error: file %s" % f)        
 # Final accumulator?
 if len(timeaccumlist) > 0:
-    stackout = os.path.join(stackedpath, "stack-%d.fits" % stackedcnt)
+    stackout = os.path.join(stackedpath, "stack-%04d.fits" % stackedcnt)
     runstacking(timeaccumra, timeaccumdec, timeaccumlist, stackout, mjdobs, mjdend)
     stackedcnt = stackedcnt + 1
 

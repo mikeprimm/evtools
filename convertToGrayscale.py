@@ -69,12 +69,12 @@ for f in filelist:
             basename = os.path.basename(f)
             # DO PROCESSING....
             if togray:
-                dst = cv2.cvtColor(hduList[0].data, cv2.COLOR_BayerBG2GRAY)
+                dst = cv2.cvtColor(hduList[0].data, cv2.COLOR_BayerGB2GRAY)
                 for idx, val in enumerate(dst):
                     hduList[0].data[idx] = val
             else:
                 # Demosaic the image
-                dst = cv2.cvtColor(hduList[0].data, cv2.COLOR_BayerBG2BGR)
+                dst = cv2.cvtColor(hduList[0].data, cv2.COLOR_BayerGB2BGR)
                 for idx, val in enumerate(dst):
                     hduList[0].data[idx] = val[:,coloridx]
             hduList.writeto(os.path.join(outputdir, basename), overwrite=True)
