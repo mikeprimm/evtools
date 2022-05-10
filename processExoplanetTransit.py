@@ -2,6 +2,7 @@ import argparse
 from genericpath import isfile
 import os
 import pathlib
+from tkinter import E
 from astropy.io import fits
 import cv2
 import csv
@@ -9,17 +10,21 @@ import numpy as np
 import subprocess
 
 def runsolving(ra, dec, infile, outfile):
-    rslt = subprocess.run(["solve-field", infile,
-        "--no-plots", "--overwrite",
-        "--ra", str(ra),
-        "--dec", str(dec),
-        "--radius", "5",
-        "--new-fits", outfile ], 
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    if rslt.returncode != 0:
-        print("Error solving %s - skipping" % f)
+    try:
+        rslt = subprocess.run(["solve-field", infile,
+            "--no-plots", "--overwrite",
+            "--ra", str(ra),
+            "--dec", str(dec),
+            "--radius", "5",
+            "--new-fits", outfile ], 
+            timeout=10, capture_output=True)
+        if rslt.returncode != 0:
+            print("Error solving %s - skipping" % f)
+            return False
+        return True
+    except subprocess.TimeoutExpired:
+        print("Timeout solving %s - skipping" % f)
         return False
-    return True
 
 def runstacking(ra, dec, fitsfiles, stackfile, mjdobs, mjdend): 
     print("Stacking %d images into %s" % (len(fitsfiles), stackfile))
@@ -32,7 +37,7 @@ def runstacking(ra, dec, fitsfiles, stackfile, mjdobs, mjdend):
         "-RESAMPLE_DIR", tmppath,
         "-COPY_KEYWORDS", "OBJECT,ORIGIN,MINSYET,TELESCOP,INSTUME,SERIALNB,TIMEUNIT,LATITUDE,LONGITUD,GAIN,GAINDB,ALTITUDE,CMOSTEMP,OBSMODE,DATE,SOFTVER" ]                              
     stackargs.extend(fitsfiles)
-    rslt = subprocess.run(stackargs,stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    rslt = subprocess.run(stackargs, capture_output=True)
     if rslt.returncode != 0:
         print("Error stacking %s" % stackfile)
         return False
@@ -193,10 +198,13 @@ for f in lightfiles:
                 if (len(timeaccumlist) > 0) and ((timeaccumstart + stacktime) < tobs):
                     stackout = os.path.join(stackedpath, "stack-%04d.fits" % stackedcnt)
                     tmpout = os.path.join(tmppath, "tmpstack.fits")
-                    runstacking(timeaccumra, timeaccumdec, timeaccumlist, stackout, mjdobs, mjdend)
+                    try: 
+                        runstacking(timeaccumra, timeaccumdec, timeaccumlist, stackout, mjdobs, mjdend)
+                        stackedcnt = stackedcnt + 1
+                    except OSError as e:
+                        print("Error: stacking file %s - %s (%s)" % (stackout, e.__class__, e))     
                     timeaccumlist = []
                     timeaccumstart = 0
-                    stackedcnt = stackedcnt + 1
                 else:
                     # If first one to accumulate, save start time and RA/Dec
                     if (len(timeaccumlist) == 0):
@@ -208,13 +216,16 @@ for f in lightfiles:
                     mjdend = hduList[0].header['MJD-END']
                 solvedcnt = solvedcnt + 1
             cnt = cnt + 1
-    except OSError:
-        print("Error: file %s" % f)        
+    except OSError as e:
+        print("Error: file %s - %s (%s)" % (f, e.__class__, e))     
 # Final accumulator?
 if len(timeaccumlist) > 0:
     stackout = os.path.join(stackedpath, "stack-%04d.fits" % stackedcnt)
-    runstacking(timeaccumra, timeaccumdec, timeaccumlist, stackout, mjdobs, mjdend)
-    stackedcnt = stackedcnt + 1
+    try: 
+        runstacking(timeaccumra, timeaccumdec, timeaccumlist, stackout, mjdobs, mjdend)
+        stackedcnt = stackedcnt + 1
+    except OSError as e:
+        print("Error: stacking file %s - %s (%s)" % (stackout, e.__class__, e))     
 
 print("Processed %d out of %d files and %d stacks into destination '%s'" % (solvedcnt, cnt, stackedcnt, outputdir))
 
