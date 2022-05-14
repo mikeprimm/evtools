@@ -17,7 +17,7 @@ def runsolving(ra, dec, infile, outfile):
             "--dec", str(dec),
             "--radius", "5",
             "--new-fits", outfile ], 
-            timeout=10, capture_output=True)
+            timeout=30, capture_output=True)
         if rslt.returncode != 0:
             print("Error solving %s - skipping" % f)
             return False
@@ -64,7 +64,8 @@ parser.add_argument('-b', "--blue", action='store_true')
 parser.add_argument("-G", "--gray", action='store_true')
 # Add number of minutes to stack
 parser.add_argument("--stacktime", help = "Number of mintutes to stack (default 2)") 
-parser.add_argument("--presolve", action='store_true')
+parser.add_argument("--presolve", action='store_true', help = "If set, solve subs before stacking")
+parser.add_argument("--keepsolved", action='store_true', help = "If set, keep solved subs after stacking")
 
 # Read arguments from command line
 try:
@@ -113,6 +114,9 @@ else:
 dopresolve = False
 if args.presolve:
     dopresolve = True
+dokeepsolved = False
+if args.keepsolved:
+    dokeepsolved = args.keepsolved;
 darkfiles = []
 lightfiles = []
 with open(args.csvfile, newline='') as csvfile:
@@ -202,7 +206,10 @@ for f in lightfiles:
                         runstacking(timeaccumra, timeaccumdec, timeaccumlist, stackout, mjdobs, mjdend)
                         stackedcnt = stackedcnt + 1
                     except OSError as e:
-                        print("Error: stacking file %s - %s (%s)" % (stackout, e.__class__, e))     
+                        print("Error: stacking file %s - %s (%s)" % (stackout, e.__class__, e))   
+                    if dokeepsolved == False:
+                        for f in timeaccumlist:
+                            os.remove(f)  
                     timeaccumlist = []
                     timeaccumstart = 0
                 else:
@@ -226,6 +233,9 @@ if len(timeaccumlist) > 0:
         stackedcnt = stackedcnt + 1
     except OSError as e:
         print("Error: stacking file %s - %s (%s)" % (stackout, e.__class__, e))     
+    if dokeepsolved == False:
+        for f in timeaccumlist:
+            os.remove(f)  
 
 print("Processed %d out of %d files and %d stacks into destination '%s'" % (solvedcnt, cnt, stackedcnt, outputdir))
 
