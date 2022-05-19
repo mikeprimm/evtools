@@ -4,10 +4,15 @@ import os
 import pathlib
 from tkinter import E
 from astropy.io import fits
+from astropy.wcs import WCS, FITSFixedWarning
+from astropy.coordinates import SkyCoord
 import cv2
 import csv
 import numpy as np
 import subprocess
+import warnings
+
+warnings.simplefilter('ignore', category=FITSFixedWarning)
 
 def runsolving(ra, dec, infile, outfile):
     try:
@@ -32,8 +37,8 @@ def runstacking(ra, dec, fitsfiles, stackfile, mjdobs, mjdend):
     stackargs = [ "SWarp", 
         "-IMAGEOUT_NAME", tmpst, 
         "-WRITE_XML", "N",
-        "-CENTER_TYPE", "MANUAL",
-        "-CENTER", "%f,%f" % (ra, dec),
+#        "-CENTER_TYPE", "MANUAL",
+#        "-CENTER", "%f,%f" % (ra, dec),
         "-RESAMPLE_DIR", tmppath,
         "-COPY_KEYWORDS", "OBJECT,ORIGIN,MINSYET,TELESCOP,INSTUME,SERIALNB,TIMEUNIT,LATITUDE,LONGITUD,GAIN,GAINDB,ALTITUDE,CMOSTEMP,OBSMODE,DATE,SOFTVER" ]                              
     stackargs.extend(fitsfiles)
@@ -49,6 +54,9 @@ def runstacking(ra, dec, fitsfiles, stackfile, mjdobs, mjdend):
             hduList[0].header['MJD-END'] = mjdend
             hduList[0].header['MJD-MID'] = (mjdobs + mjdend) / 2
             hduList.writeto(stackfile, overwrite=True)
+            w = WCS(hduList[0].header)
+            x, y = w.world_to_pixel(fov)
+            print("Stacked file %s: target at pixel %f, %f" % (stackfile, x, y))
         return True
     return False
 # Initialize parser
@@ -126,8 +134,14 @@ with open(args.csvfile, newline='') as csvfile:
         if category == 'dark':
             darkfiles.append(row['filename'])
         elif category == 'science':
+            # Remember RA, DEC for first science frame - assume this is right
+            if (len(lightfiles) == 0):
+                fov = SkyCoord(float(row['fovra']), float(row['fovdec']), frame='icrs', unit='deg')
             lightfiles.append(row['filename']) 
+            
     print("CSV file has %d darks and %d science FITS files" % (len(darkfiles), len(lightfiles)))
+
+print("Center of FOV for first science: %s" % fov.to_string("dms"))
 
 dark = fits.HDUList()
 
@@ -161,12 +175,12 @@ timeaccumdec = 0
 mjdobs = 0
 mjdend = 0
 stackedcnt = 0
+
 for f in lightfiles:
     try:
         # Load file into list of HDU list 
         fname = os.path.join(basedir, f)
         with fits.open(fname) as hduList:
-            print("Processing %s" % fname)
             # First, calibrate image
             if len(dark) > 0:
                 # Clamp the data with the dark from below, so we can subtract without rollover
@@ -192,6 +206,17 @@ for f in lightfiles:
                 # Now run solve-field to generate final file
                 rslt = runsolving(hduList[0].header['FOVRA'], hduList[0].header['FOVDEC'],
                     os.path.join(tmppath, "tmp.fits"), newfits )
+                if rslt == True:
+                    # Read new file - see if we are still in frame
+                    with fits.open(newfits) as hduListNew:
+                        w = WCS(hduListNew[0].header)
+                        shape = hduList[0].data.shape
+                        x, y = w.world_to_pixel(fov)
+                        print("Solved %s:  target at %f, %f" % (newfits, x, y))
+                        # If out of range, drop the frame
+                        if (x < 0) or (x >= shape[0]) or (y < 0) or (y >= shape[1]):
+                            rslt = False;
+                            print("Discarding %s - target out of frame" % fname)                    
             else:   # No presolve
                 hduList.writeto(newfits, overwrite=True)
             if rslt == False:
