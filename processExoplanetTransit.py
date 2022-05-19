@@ -140,14 +140,14 @@ if len(darkfiles) > 0:
             with fits.open(fname) as hduList:
                 # Use first one as base
                 if len(dark) == 0:
-                    darkaccum = np.zeros(hduList[0].data.shape)
+                    darkaccum = np.zeros((0,) + hduList[0].data.shape)
                     dark.append(hduList[0].copy())
-                np.add(darkaccum, hduList[0].data, out=darkaccum)
+                darkaccum = np.append(darkaccum, [ hduList[0].data ], axis=0)
                 hduList.writeto(os.path.join(darkpath, f), overwrite=True)
         except OSError:
             print("Error: file %s" % f)        
-    # Now compute average for each pixel
-    darkaccum = darkaccum // len(darkfiles)
+    # Now compute median for each pixel
+    darkaccum = np.median(darkaccum, axis=0)
     dark[0].data = darkaccum.astype(np.uint16)
     # And write output dark
     dark.writeto(os.path.join(darkpath, "master-dark.fits"), overwrite=True)
