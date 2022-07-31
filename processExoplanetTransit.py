@@ -129,7 +129,6 @@ timeaccumra = 0
 timeaccumdec = 0
 mjdobs = 0
 mjdend = 0
-stackedcnt = 0
 
 for f in lightfiles:
     try:
@@ -184,5 +183,5 @@ for f in lightfiles:
     except OSError as e:
         print("Error: file %s - %s (%s)" % (f, e.__class__, e))     
 
-print("Processed %d out of %d files and %d stacks into destination '%s'" % (solvedcnt, cnt, stackedcnt, outputdir))
+print("Processed %d out of %d files into destination '%s'" % (solvedcnt, cnt, outputdir))
 
