@@ -47,6 +47,7 @@ parser.add_argument('-r', "--red", action='store_true')
 parser.add_argument('-g', "--green", action='store_true')
 parser.add_argument('-b', "--blue", action='store_true')
 parser.add_argument("-G", "--gray", action='store_true')
+parser.add_argument("-B", "--blueblock", action='store_true')
 
 # Read arguments from command line
 try:
@@ -74,19 +75,34 @@ tmppath = os.path.join(outputdir, "tmp")
 pathlib.Path(tmppath).mkdir(parents=True, exist_ok=True)
 
 togray = False
+blueblock = False
+tobayer = False
 coloridx = 0
+fltname='bayer'
 if args.red:
     coloridx = 2   # Red
     print("Produce red channel FITS files")
+    fltname='TR'
 elif args.green:
     coloridx = 1   # Green
     print("Produce green channel FITS files")
+    fltname='TG'
 elif args.blue:
     coloridx = 0   # Blue
     print("Produce blue channel FITS files")
-else:
+    fltname='TB'
+elif args.blueblock:
+    blueblock = True
+    print("Produce blue-blocked grayscale FITS files")
+    fltname='CBB'
+elif args.gray:
     togray = True
     print("Produce grayscale FITS files")
+    fltname='CV'
+else:
+    tobayer = True
+    print("Produce Bayer FITS files")
+    fltname='BAYER'
 darkfiles = []
 # Go through the darks
 for path in os.listdir(darksrcdir):
@@ -163,6 +179,14 @@ for f in lightfiles:
                 dst = cv2.cvtColor(hduList[0].data, cv2.COLOR_BayerRG2GRAY)
                 for idx, val in enumerate(dst):
                     hduList[0].data[idx] = val
+            elif blueblock:
+                # Demosaic the image
+                dst = cv2.cvtColor(hduList[0].data, cv2.COLOR_BayerRG2BGR)
+                for idx, val in enumerate(dst):
+                    val[:,0] = 0    # Zero out blue
+                dst = cv2.cvtColor(dst, cv2.COLOR_BGR2GRAY)
+                for idx, val in enumerate(dst):
+                    hduList[0].data[idx] = val
             else:
                 # Demosaic the image
                 dst = cv2.cvtColor(hduList[0].data, cv2.COLOR_BayerRG2BGR)
@@ -173,8 +197,13 @@ for f in lightfiles:
             bjdtimes = utc_tdb.JDUTC_to_BJDTDB(mjdtimes + 2400000.5, ra=fovRA, dec=fovDec,
                         lat=obsLatitude, longi=obsLongitude, alt=obsAltitude)[0]
             hduList[0].header.set('BJD_TDB', bjdtimes[0], "barycentric Julian date of the mid obs")
+            # Add bayer header if leaving as bayer file
+            if tobayer:
+                hduList[0].header.set('BAYERPAT', 'RGGB')
+                hduList[0].header.set('XBAYROFF', 0)
+                hduList[0].header.set('YBAYROFF', 0)
             rslt = True
-            newfname = "science-{0:05d}.fits".format(cnt)
+            newfname = "science-{1}-{0:05d}.fits".format(cnt, fltname)
             newfits = os.path.join(sciencepath, newfname)
             # Write to temporary file so that we can run solve-field to
             # set WCS data
