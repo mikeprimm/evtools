@@ -6,11 +6,13 @@ from tkinter import E
 from astropy.io import fits
 from astropy.wcs import WCS, FITSFixedWarning
 from astropy.coordinates import SkyCoord
+from astropy.time import Time
 import cv2
 import numpy as np
 import subprocess
 import warnings
-
+# UTC to BJD converter import
+from barycorrpy import utc_tdb
 from pandas import isna
 
 warnings.simplefilter('ignore', category=FITSFixedWarning)
@@ -89,6 +91,7 @@ darkfiles = []
 # Go through the darks
 for path in os.listdir(darksrcdir):
     dfile = os.path.join(darksrcdir, path)
+    if (path.startswith('.')): continue
     # check if current path is a file
     if os.path.isfile(dfile):
         darkfiles.append(path)
@@ -96,6 +99,7 @@ darkfiles.sort()
 # Go through the lights
 lightfiles = []
 for path in os.listdir(sciencesrcdir):
+    if (path.startswith('.')): continue
     dfile = os.path.join(sciencesrcdir, path)
     # check if current path is a file
     if os.path.isfile(dfile):
@@ -140,8 +144,14 @@ for f in lightfiles:
         with fits.open(lfile) as hduList:
             # First science? get center as target
             if (cnt == 0):
-                fov = SkyCoord(hduList[0].header['FOVRA'], hduList[0].header['FOVDEC'], frame='icrs', unit='deg')
-                print("center of FOV for first science: RA={0}, DEC={1}".format(hduList[0].header['FOVRA'], hduList[0].header['FOVDEC']))
+                fovRA = hduList[0].header['FOVRA']
+                fovDec = hduList[0].header['FOVDEC']
+                fov = SkyCoord(fovRA, fovDec, frame='icrs', unit='deg')
+                print("center of FOV for first science: RA={0}, DEC={1}".format(fovRA, fovDec))
+                obsLongitude = hduList[0].header['LONGITUD']
+                obsLatitude = hduList[0].header['LATITUDE']
+                obsAltitude = hduList[0].header['ALTITUDE']
+                print("Observatory: Lat={0} deg, Lon={1} deg, Alt={2} meters".format(obsLatitude, obsLongitude, obsAltitude))
             # First, calibrate image
             if len(dark) > 0:
                 # Clamp the data with the dark from below, so we can subtract without rollover
@@ -158,6 +168,11 @@ for f in lightfiles:
                 dst = cv2.cvtColor(hduList[0].data, cv2.COLOR_BayerRG2BGR)
                 for idx, val in enumerate(dst):
                     hduList[0].data[idx] = val[:,coloridx]
+            # Compute BJD times
+            mjdtimes = np.array([hduList[0].header['MJD-MID']])
+            bjdtimes = utc_tdb.JDUTC_to_BJDTDB(mjdtimes + 2400000.5, ra=fovRA, dec=fovDec,
+                        lat=obsLatitude, longi=obsLongitude, alt=obsAltitude)[0]
+            hduList[0].header.set('BJD_TDB', bjdtimes[0], "barycentric Julian date of the mid obs")
             rslt = True
             newfname = "science-{0:05d}.fits".format(cnt)
             newfits = os.path.join(sciencepath, newfname)
