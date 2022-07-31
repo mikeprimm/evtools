@@ -22,6 +22,7 @@ def runsolving(ra, dec, infile, outfile):
             "--ra", str(ra),
             "--dec", str(dec),
             "--radius", "5",
+            "--fits-image", "--guess-scale",
             "--new-fits", outfile ], 
             timeout=30, capture_output=True)
         if rslt.returncode != 0:
@@ -65,6 +66,8 @@ darkpath = os.path.join(outputdir, "darks")
 pathlib.Path(darkpath).mkdir(parents=True, exist_ok=True)
 sciencepath = os.path.join(outputdir, "science")
 pathlib.Path(sciencepath).mkdir(parents=True, exist_ok=True)
+badsciencepath = os.path.join(outputdir, "science-rej")
+pathlib.Path(badsciencepath).mkdir(parents=True, exist_ok=True)
 tmppath = os.path.join(outputdir, "tmp")
 pathlib.Path(tmppath).mkdir(parents=True, exist_ok=True)
 
@@ -156,7 +159,8 @@ for f in lightfiles:
                 for idx, val in enumerate(dst):
                     hduList[0].data[idx] = val[:,coloridx]
             rslt = True
-            newfits = os.path.join(sciencepath, "science-{0:05d}.fits".format(cnt))
+            newfname = "science-{0:05d}.fits".format(cnt)
+            newfits = os.path.join(sciencepath, newfname)
             # Write to temporary file so that we can run solve-field to
             # set WCS data
             hduList.writeto(os.path.join(tmppath, "tmp.fits"), overwrite=True)
@@ -173,9 +177,10 @@ for f in lightfiles:
                     # If out of range, drop the frame
                     if (x < 0) or (x >= shape[0]) or (y < 0) or (y >= shape[1]):
                         rslt = False;
-                        print("Discarding %s - target out of frame" % fname)                    
+                        print("Rejecting - target out of frame" % f)  
             if rslt == False:
                 print("Error solving %s - skipping" % f)
+                hduList.writeto(os.path.join(badsciencepath, newfname), overwrite=True)
             else:
                 tobs = hduList[0].header['MJD-OBS'] * 24 * 60 # MJD in minutes
                 solvedcnt = solvedcnt + 1
