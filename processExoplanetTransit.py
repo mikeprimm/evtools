@@ -58,6 +58,9 @@ parser.add_argument("-G", "--gray", action='store_true')
 parser.add_argument("-B", "--blueblock", action='store_true')
 parser.add_argument("--ra", help = "Target RA", required = True)
 parser.add_argument("--dec", help = "Target Dec", required = True)
+parser.add_argument("--obslat", help = "Observatory Latitude (deg)")
+parser.add_argument("--obslon", help = "Observatory Longitude (deg east)")
+parser.add_argument("--obsalt", help = "Observatory Altitude (meters)")
 
 # Read arguments from command line
 try:
@@ -73,6 +76,16 @@ if args.darks:
 sciencesrcdir='science'
 if args.science:
     sciencesrcdir = args.science
+obsAltitude = None
+obsLatitude = None
+obsLongitude = None
+if args.obslat:
+    obsLatitude = float(args.obslat)
+if args.obslon:
+    obsLongitude = float(args.obslon)
+if args.obsalt:
+    obsAltitude = float(args.obsalt)
+
 # Get target
 target = SkyCoord(args.ra, args.dec, frame='icrs', unit=(u.hourangle, u.deg))
 targetRA = target.ra.deg
@@ -172,11 +185,13 @@ for f in lightfiles:
         lfile = os.path.join(sciencesrcdir, f)
         # Load file into list of HDU list 
         with fits.open(lfile) as hduList:
-            if cnt == 0:
-                print("target coordinates: {0}".format(target.to_string('hmsdms')))
-                obsLongitude = hduList[0].header['LONGITUD']
-                obsLatitude = hduList[0].header['LATITUDE']
+            if obsAltitude is None:
                 obsAltitude = hduList[0].header['ALTITUDE']
+            if obsLatitude is None:
+                obsLatitude = hduList[0].header['LATITUDE']
+            if obsLongitude is None:
+                obsLongitude = hduList[0].header['LONGITUD']
+            if cnt == 0:
                 print("Observatory: Lat={0} deg, Lon={1} deg, Alt={2} meters".format(obsLatitude, obsLongitude, obsAltitude))
             # First, calibrate image
             if len(dark) > 0:
@@ -224,6 +239,13 @@ for f in lightfiles:
             hduList[0].header.set('ALT_OBJ', float(altaz.alt.deg), "Target altitude at mid-exposure")
             hduList[0].header.set('AZ_OBJ', float(altaz.az.deg), "Target azimuth at mid-exposure")
             hduList[0].header.set('ZD_OBJ', 90.0 - float(altaz.alt.deg), "Target zenith distance at mid-exposure")
+            if ('ALTITUDE' in hduList[0].header) == False:
+                hduList[0].header.set('ALTITUDE', obsAltitude, "altitude in meters of observing site")
+            if ('LATITUDE' in hduList[0].header) == False:
+                hduList[0].header.set('LATITUDE', obsLatitude, "latitude in degrees north of observing site")
+            if ('LONGITUD' in hduList[0].header) == False:
+                hduList[0].header.set('LONGITUD', obsLongitude, "longitude in degrees east of observing site")
+
             rslt = True
             newfname = "science-{1}-{0:05d}.fits".format(cnt, fltname)
             newfits = os.path.join(sciencepath, newfname)
