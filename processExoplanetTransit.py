@@ -5,8 +5,9 @@ import pathlib
 from tkinter import E
 from astropy.io import fits
 from astropy.wcs import WCS, FITSFixedWarning
-from astropy.coordinates import SkyCoord
+from astropy.coordinates import SkyCoord, EarthLocation, AltAz
 from astropy.time import Time
+import astropy.units as u
 import cv2
 import numpy as np
 import subprocess
@@ -35,6 +36,13 @@ def runsolving(ra, dec, infile, outfile):
         print("Timeout solving %s - skipping" % f)
         return False
 
+def calcAltAz(ra, dec, lat, lon, alt, mjdtime):
+    pointing = SkyCoord(str(ra) + " " + str(dec), unit=(u.deg, u.deg), frame='icrs')
+    location = EarthLocation.from_geodetic(lat=lat * u.deg, lon=lon * u.deg, height=alt)
+    atime = Time(mjdtime, format='mjd', scale='utc', location=location)
+    pointingAltAz = pointing.transform_to(AltAz(obstime=atime, location=location))
+    return pointingAltAz
+
 # Initialize parser
 parser = argparse.ArgumentParser()
 # Add input argument
@@ -48,6 +56,8 @@ parser.add_argument('-g', "--green", action='store_true')
 parser.add_argument('-b', "--blue", action='store_true')
 parser.add_argument("-G", "--gray", action='store_true')
 parser.add_argument("-B", "--blueblock", action='store_true')
+parser.add_argument("--ra", help = "Target RA", required = True)
+parser.add_argument("--dec", help = "Target Dec", required = True)
 
 # Read arguments from command line
 try:
@@ -63,6 +73,10 @@ if args.darks:
 sciencesrcdir='science'
 if args.science:
     sciencesrcdir = args.science
+# Get target
+target = SkyCoord(args.ra, args.dec, frame='icrs', unit=(u.hourangle, u.deg))
+targetRA = target.ra.deg
+targetDec = target.dec.deg
 # Make output directory, if needed
 pathlib.Path(outputdir).mkdir(parents=True, exist_ok=True)
 darkpath = os.path.join(outputdir, "darks")
@@ -158,12 +172,8 @@ for f in lightfiles:
         lfile = os.path.join(sciencesrcdir, f)
         # Load file into list of HDU list 
         with fits.open(lfile) as hduList:
-            # First science? get center as target
-            if (cnt == 0):
-                fovRA = hduList[0].header['FOVRA']
-                fovDec = hduList[0].header['FOVDEC']
-                fov = SkyCoord(fovRA, fovDec, frame='icrs', unit='deg')
-                print("center of FOV for first science: RA={0}, DEC={1}".format(fovRA, fovDec))
+            if cnt == 0:
+                print("target coordinates: {0}".format(target.to_string('hmsdms')))
                 obsLongitude = hduList[0].header['LONGITUD']
                 obsLatitude = hduList[0].header['LATITUDE']
                 obsAltitude = hduList[0].header['ALTITUDE']
@@ -194,7 +204,7 @@ for f in lightfiles:
                     hduList[0].data[idx] = val[:,coloridx]
             # Compute BJD times
             mjdtimes = np.array([hduList[0].header['MJD-MID']])
-            bjdtimes = utc_tdb.JDUTC_to_BJDTDB(mjdtimes + 2400000.5, ra=fovRA, dec=fovDec,
+            bjdtimes = utc_tdb.JDUTC_to_BJDTDB(mjdtimes + 2400000.5, ra=targetRA, dec=targetDec,
                         lat=obsLatitude, longi=obsLongitude, alt=obsAltitude)[0]
             hduList[0].header.set('BJD_TDB', bjdtimes[0], "barycentric Julian date of the mid obs")
             # Add bayer header if leaving as bayer file
@@ -202,6 +212,18 @@ for f in lightfiles:
                 hduList[0].header.set('BAYERPAT', 'RGGB')
                 hduList[0].header.set('XBAYROFF', 0)
                 hduList[0].header.set('YBAYROFF', 0)
+            # Add alt-az for target
+            altaz = calcAltAz(targetRA, targetDec, obsLatitude, obsLongitude, obsAltitude, mjdtimes[0])
+            # Add AIRMASS
+            hduList[0].header.set('AIRMASS', float(altaz.secz))
+            # Add RAOBJ2K, DECOBJ2K, SITELAT, SITELONG, ALT_OBJ, AZ_OBJ, ZD_OBJ
+            hduList[0].header.set('SITELAT', obsLatitude, "geographic latitude of observatory")
+            hduList[0].header.set('SITELONG', obsLongitude, "geographic longitude of observatory")
+            hduList[0].header.set('RAOBJ2K', targetRA / 15, "J2000 right ascension of target (hours)")
+            hduList[0].header.set('DECOBJ2K', targetDec, "J2000 declination of target (degrees)")
+            hduList[0].header.set('ALT_OBJ', float(altaz.alt.deg), "Target altitude at mid-exposure")
+            hduList[0].header.set('AZ_OBJ', float(altaz.az.deg), "Target azimuth at mid-exposure")
+            hduList[0].header.set('ZD_OBJ', 90.0 - float(altaz.alt.deg), "Target zenith distance at mid-exposure")
             rslt = True
             newfname = "science-{1}-{0:05d}.fits".format(cnt, fltname)
             newfits = os.path.join(sciencepath, newfname)
@@ -216,7 +238,7 @@ for f in lightfiles:
                 with fits.open(newfits) as hduListNew:
                     w = WCS(hduListNew[0].header)
                     shape = hduList[0].data.shape
-                    x, y = w.world_to_pixel(fov)
+                    x, y = w.world_to_pixel(target)
                     print("Solved %s:  target at %f, %f" % (newfits, x, y))
                     # If out of range, drop the frame
                     if (x < 0) or (x >= shape[0]) or (y < 0) or (y >= shape[1]):
@@ -226,7 +248,6 @@ for f in lightfiles:
                 print("Error solving %s - skipping" % f)
                 hduList.writeto(os.path.join(badsciencepath, newfname), overwrite=True)
             else:
-                tobs = hduList[0].header['MJD-OBS'] * 24 * 60 # MJD in minutes
                 solvedcnt = solvedcnt + 1
             cnt = cnt + 1
     except OSError as e:
