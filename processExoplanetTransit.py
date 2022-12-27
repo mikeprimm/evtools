@@ -265,7 +265,7 @@ for f in lightfiles:
                     # If out of range, drop the frame
                     if (x < 0) or (x >= shape[0]) or (y < 0) or (y >= shape[1]):
                         rslt = False;
-                        print("Rejecting - target out of frame" % f)  
+                        print("Rejecting - target out of frame %s" % f)  
             if rslt == False:
                 print("Error solving %s - skipping" % f)
                 hduList.writeto(os.path.join(badsciencepath, newfname), overwrite=True)
