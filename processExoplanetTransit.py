@@ -2,6 +2,7 @@ import argparse
 from genericpath import isfile
 import os
 import pathlib
+import shutil
 from tkinter import E
 from astropy.io import fits
 from astropy.wcs import WCS, FITSFixedWarning
@@ -58,10 +59,12 @@ parser.add_argument("-G", "--gray", action='store_true')
 parser.add_argument("-B", "--blueblock", action='store_true')
 parser.add_argument("--ra", help = "Target RA", required = True)
 parser.add_argument("--dec", help = "Target Dec", required = True)
+parser.add_argument("--c1ra", help = "Comparison 1 RA")
+parser.add_argument("--c1dec", help = "Comparison 1 Dec")
 parser.add_argument("--obslat", help = "Observatory Latitude (deg)")
 parser.add_argument("--obslon", help = "Observatory Longitude (deg east)")
 parser.add_argument("--obsalt", help = "Observatory Altitude (meters)")
-
+parser.add_argument("-bb", "--borderbuffer", help="Border buffer (pixels)", type=int)
 # Read arguments from command line
 try:
     args = parser.parse_args()
@@ -76,6 +79,9 @@ if args.darks:
 sciencesrcdir='science'
 if args.science:
     sciencesrcdir = args.science
+borderbuffer = 20
+if args.borderbuffer:
+    borderbuffer = args.borderbuffer
 obsAltitude = None
 obsLatitude = None
 obsLongitude = None
@@ -90,6 +96,11 @@ if args.obsalt:
 target = SkyCoord(args.ra, args.dec, frame='icrs', unit=(u.hourangle, u.deg))
 targetRA = target.ra.deg
 targetDec = target.dec.deg
+c1 = None
+if args.c1ra:
+   c1 = SkyCoord(args.c1ra, args.c1dec, frame='icrs', unit=(u.hourangle, u.deg))
+   c1RA = c1.ra.deg
+   c1Dec = c1.dec.deg
 # Make output directory, if needed
 pathlib.Path(outputdir).mkdir(parents=True, exist_ok=True)
 darkpath = os.path.join(outputdir, "darks")
@@ -255,23 +266,31 @@ for f in lightfiles:
             # Now run solve-field to generate final file
             rslt = runsolving(hduList[0].header['FOVRA'], hduList[0].header['FOVDEC'],
                 os.path.join(tmppath, "tmp.fits"), newfits )
-            if rslt == True:
-                # Read new file - see if we are still in frame
+            if rslt == False:
+                print("Error solving %s - skipping" % f)
+                hduList.writeto(os.path.join(badsciencepath, f), overwrite=True)
+            else:
+                solvedcnt = solvedcnt + 1
                 with fits.open(newfits) as hduListNew:
                     w = WCS(hduListNew[0].header)
                     shape = hduList[0].data.shape
                     x, y = w.world_to_pixel(target)
-                    print("Solved %s:  target at %f, %f" % (newfits, x, y))
+                    if c1 is None:
+                       x1 = x
+                       y1 = y
+                    else:
+                       x1, y1 = w.world_to_pixel(c1)
                     # If out of range, drop the frame
-                    if (x < 0) or (x >= shape[0]) or (y < 0) or (y >= shape[1]):
+                    if (x < borderbuffer) or (x >= (shape[0]-borderbuffer)) or (y < borderbuffer) or (y >= (shape[1]-borderbuffer)):
                         rslt = False;
-                        print("Rejecting - target out of frame %s" % f)  
-            if rslt == False:
-                print("Error solving %s - skipping" % f)
-                hduList.writeto(os.path.join(badsciencepath, newfname), overwrite=True)
-            else:
-                solvedcnt = solvedcnt + 1
-            cnt = cnt + 1
+                        print("Rejecting - target out of frame %s (%f, %f)" % (f, x, y))
+                        shutil.move(newfits, os.path.join(badsciencepath, f))
+                    elif (x1 < borderbuffer) or (x1 >= (shape[0]-borderbuffer)) or (y1 < borderbuffer) or (y1 >= (shape[1]-borderbuffer)):
+                        rslt = False;
+                        print("Rejecting - comparison 1 out of frame %s (%f, %f)" % (f, x1, y1))
+                        shutil.move(newfits, os.path.join(badsciencepath, f))
+                    else:
+                        cnt = cnt + 1
     except OSError as e:
         print("Error: file %s - %s (%s)" % (f, e.__class__, e))     
 
