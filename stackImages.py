@@ -40,29 +40,32 @@ def runsolving(ra, dec, infile, outfile):
 
 def runstacking(ra, dec, fitsfiles, stackfile, mjdobs, mjdend): 
     print("Stacking %d images into %s" % (len(fitsfiles), stackfile))
-    exptime = 0
-    with fits.open(os.path.join(inputdir, fitsfiles[0])) as hduList0:
-        stackaccum = hduList0[0].data.astype(np.float64)
-        stackcnt = np.ones(hduList0[0].data.shape)    
-        exptime = hduList0[0].header['EXPTIME']
-        for f in fitsfiles:
-            if (f == fitsfiles[0]):
-               continue
-            with fits.open(os.path.join(inputdir, f)) as hduList1:
-                # Map to WCS of first image
-                array, footprint = reproject_interp(hduList1, hduList0[0].header)
-                stackaccum += array * footprint
-                stackcnt += footprint
-                exptime += hduList1[0].header['EXPTIME']
-        stackaccum = stackaccum / stackcnt
-        hduList0[0].data = stackaccum.astype(np.uint16)
-        hduList0[0].header['MJD-OBS'] = mjdobs
-        hduList0[0].header['MJD-END'] = mjdend
-        hduList0[0].header['MJD-MID'] = (mjdobs + mjdend) / 2
-        hduList0[0].header['EXPTIME'] = exptime
-        hduList0.writeto(stackfile, overwrite=True)
-
-    return False
+    tmpst = os.path.join(tmppath, "tmpstack.fits")
+    stackargs = [ "SWarp", 
+        "-IMAGEOUT_NAME", tmpst, 
+        "-WRITE_XML", "N",
+        "-RESAMPLE_DIR", tmppath,
+        "-COPY_KEYWORDS", "OBJECT,ORIGIN,MINSYET,TELESCOP,INSTUME,SERIALNB,TIMEUNIT,LATITUDE,LONGITUD,GAIN,GAINDB,ALTITUDE,CMOSTEMP,OBSMODE,DATE,SOFTVER" ]                              
+    stackargs.extend(fitsfiles)
+    rslt = subprocess.run(stackargs, capture_output=True)
+    if rslt.returncode != 0:
+        print("Error stacking %s" % stackfile)
+        return False
+    # Read first file - use its WCS
+    with fits.open(fitsfiles[0]) as hduList0:
+        with fits.open(tmpst) as hduList1:
+            stackaccum = hduList0[0].data.astype(np.float64)
+            stackcnt = np.ones(hduList0[0].data.shape)    
+            exptime = hduList0[0].header['EXPTIME'] * len(fitsfiles)
+            # Map to WCS of first image
+            array, footprint = reproject_interp(hduList1, hduList0[0].header)
+            hduList1[0].data = stackaccum.astype(np.uint16)  # Save new data
+            hduList1[0].header['MJD-OBS'] = mjdobs
+            hduList1[0].header['MJD-END'] = mjdend
+            hduList1[0].header['MJD-MID'] = (mjdobs + mjdend) / 2
+            hduList1[0].header['EXPTIME'] = exptime
+            hduList1.writeto(tmpst, overwrite=True)
+    return runsolving(ra, dec, tmpst, stackfile)
     
 def calcAltAz(ra, dec, lat, lon, alt, mjdtime):
     pointing = SkyCoord(str(ra) + " " + str(dec), unit=(u.deg, u.deg), frame='icrs')
@@ -142,7 +145,7 @@ for f in lightfiles:
                     timeaccumra = hduList[0].header['FOVRA']
                     timeaccumdec = hduList[0].header['FOVDEC']
                     mjdobs = hduList[0].header['MJD-OBS']
-                timeaccumlist.append(f)
+                timeaccumlist.append(lfile)
                 mjdend = hduList[0].header['MJD-END']
         cnt = cnt + 1
     except OSError as e:
