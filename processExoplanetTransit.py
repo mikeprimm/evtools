@@ -3,6 +3,7 @@ from genericpath import isfile
 import os
 import pathlib
 import shutil
+import logging
 from tkinter import E
 from astropy.io import fits
 from astropy.wcs import WCS, FITSFixedWarning
@@ -19,6 +20,15 @@ from pandas import isna
 
 warnings.simplefilter('ignore', category=FITSFixedWarning)
 
+# create logger
+logger = logging.getLogger('processExoplanetTransit')
+logger.setLevel(logging.DEBUG)
+ch = logging.StreamHandler()
+ch.setLevel(logging.DEBUG)
+formatter = logging.Formatter('%(asctime)s %(levelname)s - %(message)s')
+ch.setFormatter(formatter)
+logger.addHandler(ch)
+
 def runsolving(ra, dec, infile, outfile):
     try:
         rslt = subprocess.run(["solve-field", infile,
@@ -28,13 +38,13 @@ def runsolving(ra, dec, infile, outfile):
             "--radius", "5",
             "--fits-image", "--guess-scale",
             "--new-fits", outfile ], 
-            timeout=30, capture_output=True)
+            timeout=10, capture_output=True)
         if rslt.returncode != 0:
-            print("Error solving %s - skipping" % f)
+            logger.error("Error solving %s - skipping" % f)
             return False
         return True
     except subprocess.TimeoutExpired:
-        print("Timeout solving %s - skipping" % f)
+        logger.error("Timeout solving %s - skipping" % f)
         return False
 
 def calcAltAz(ra, dec, lat, lon, alt, mjdtime):
@@ -73,6 +83,12 @@ except argparse.ArgumentError:
 outputdir='output'
 if args.output: 
     outputdir = args.output
+# Add file logger
+ch2 = logging.FileHandler(os.path.join(outputdir, 'processExoplanetTransit.log'), encoding='utf-8', mode='w')
+ch2.setLevel(logging.DEBUG)
+ch2.setFormatter(formatter)
+logger.addHandler(ch2)
+
 darksrcdir='darks'
 if args.darks:
     darksrcdir = args.darks 
@@ -96,11 +112,15 @@ if args.obsalt:
 target = SkyCoord(args.ra, args.dec, frame='icrs', unit=(u.hourangle, u.deg))
 targetRA = target.ra.deg
 targetDec = target.dec.deg
+logger.info("Target coords: RA=%d:%d:%f, Dec=%s%d:%d:%f" % (target.ra.hms.h, target.ra.hms.m, target.ra.hms.s, '+' if target.dec.signed_dms.sign >= 0 else '-', target.dec.signed_dms.d, target.dec.signed_dms.m, target.dec.signed_dms.s))
+
 c1 = None
 if args.c1ra:
    c1 = SkyCoord(args.c1ra, args.c1dec, frame='icrs', unit=(u.hourangle, u.deg))
    c1RA = c1.ra.deg
    c1Dec = c1.dec.deg
+   logger.info("Comparison 1 coords: RA=%d:%d:%f, Dec=%s%d:%d:%f" % (c1.ra.hms.h, c1.ra.hms.m, c1.ra.hms.s, '+' if c1.dec.signed_dms.sign >= 0 else '-', c1.dec.signed_dms.d, c1.dec.signed_dms.m, c1.dec.signed_dms.s))
+
 # Make output directory, if needed
 pathlib.Path(outputdir).mkdir(parents=True, exist_ok=True)
 darkpath = os.path.join(outputdir, "darks")
@@ -119,27 +139,27 @@ coloridx = 0
 fltname='bayer'
 if args.red:
     coloridx = 2   # Red
-    print("Produce red channel FITS files")
+    logger.info("Produce red channel FITS files")
     fltname='TR'
 elif args.green:
     coloridx = 1   # Green
-    print("Produce green channel FITS files")
+    logger.info("Produce green channel FITS files")
     fltname='TG'
 elif args.blue:
     coloridx = 0   # Blue
-    print("Produce blue channel FITS files")
+    logger.info("Produce blue channel FITS files")
     fltname='TB'
 elif args.blueblock:
     blueblock = True
-    print("Produce blue-blocked grayscale FITS files")
+    logger.info("Produce blue-blocked grayscale FITS files")
     fltname='CBB'
 elif args.gray:
     togray = True
-    print("Produce grayscale FITS files")
+    logger.info("Produce grayscale FITS files")
     fltname='CV'
 else:
     tobayer = True
-    print("Produce Bayer FITS files")
+    logger.info("Produce Bayer FITS files")
     fltname='BAYER'
 darkfiles = []
 # Go through the darks
@@ -175,7 +195,7 @@ if len(darkfiles) > 0:
                 darkaccum = np.append(darkaccum, [ hduList[0].data ], axis=0)
                 hduList.writeto(os.path.join(darkpath, f), overwrite=True)
         except OSError:
-            print("Error: file %s" % f)        
+            logging.error("Error: file %s" % f)        
     # Now compute median for each pixel
     darkaccum = np.median(darkaccum, axis=0)
     dark[0].data = darkaccum.astype(np.uint16)
@@ -190,6 +210,7 @@ timeaccumra = 0
 timeaccumdec = 0
 mjdobs = 0
 mjdend = 0
+printfirst = True
 
 for f in lightfiles:
     try:
@@ -203,7 +224,7 @@ for f in lightfiles:
             if obsLongitude is None:
                 obsLongitude = hduList[0].header['LONGITUD']
             if cnt == 0:
-                print("Observatory: Lat={0} deg, Lon={1} deg, Alt={2} meters".format(obsLatitude, obsLongitude, obsAltitude))
+                logger.info("Observatory: Lat={0} deg, Lon={1} deg, Alt={2} meters".format(obsLatitude, obsLongitude, obsAltitude))
             # First, calibrate image
             if len(dark) > 0:
                 # Clamp the data with the dark from below, so we can subtract without rollover
@@ -283,16 +304,21 @@ for f in lightfiles:
                     # If out of range, drop the frame
                     if (x < borderbuffer) or (x >= (shape[0]-borderbuffer)) or (y < borderbuffer) or (y >= (shape[1]-borderbuffer)):
                         rslt = False;
-                        print("Rejecting - target out of frame %s (%f, %f)" % (f, x, y))
+                        logger.warning("Rejecting - target out of frame %s (%f, %f)" % (f, x, y))
                         shutil.move(newfits, os.path.join(badsciencepath, f))
                     elif (x1 < borderbuffer) or (x1 >= (shape[0]-borderbuffer)) or (y1 < borderbuffer) or (y1 >= (shape[1]-borderbuffer)):
                         rslt = False;
-                        print("Rejecting - comparison 1 out of frame %s (%f, %f)" % (f, x1, y1))
+                        logger.warning("Rejecting - comparison 1 out of frame %s (%f, %f)" % (f, x1, y1))
                         shutil.move(newfits, os.path.join(badsciencepath, f))
                     else:
+                        if printfirst:
+                            logger.info("Pixel coordinate of target: %f, %f" % (x, y))
+                            if c1 is not None:
+                                logger.info("Pixel coordinate of comparison 1: %f, %f" % (x1, y1))
+                            printfirst = False
                         cnt = cnt + 1
     except OSError as e:
-        print("Error: file %s - %s (%s)" % (f, e.__class__, e))     
+        logger.error("Error: file %s - %s (%s)" % (f, e.__class__, e))     
 
-print("Processed %d out of %d files into destination '%s'" % (solvedcnt, cnt, outputdir))
+logger.info("Processed %d out of %d files into destination '%s'" % (solvedcnt, cnt, outputdir))
 
