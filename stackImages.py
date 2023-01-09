@@ -45,6 +45,7 @@ def runstacking(ra, dec, fitsfiles, stackfile, mjdobs, mjdend):
         "-IMAGEOUT_NAME", tmpst, 
         "-WRITE_XML", "N",
         "-RESAMPLE_DIR", tmppath,
+        "-COMBINE_TYPE", "CLIPPED",
         "-COPY_KEYWORDS", "OBJECT,ORIGIN,MINSYET,TELESCOP,INSTUME,SERIALNB,TIMEUNIT,LATITUDE,LONGITUD,GAIN,GAINDB,ALTITUDE,CMOSTEMP,OBSMODE,DATE,SOFTVER" ]                              
     stackargs.extend(fitsfiles)
     rslt = subprocess.run(stackargs, capture_output=True)
@@ -56,14 +57,15 @@ def runstacking(ra, dec, fitsfiles, stackfile, mjdobs, mjdend):
         with fits.open(tmpst) as hduList1:
             stackaccum = hduList0[0].data.astype(np.float64)
             stackcnt = np.ones(hduList0[0].data.shape)    
-            exptime = hduList0[0].header['EXPTIME'] * len(fitsfiles)
+            #exptime = hduList0[0].header['EXPTIME'] * len(fitsfiles)
             # Map to WCS of first image
             array, footprint = reproject_interp(hduList1, hduList0[0].header)
-            hduList1[0].data = stackaccum.astype(np.uint16)  # Save new data
+            hduList1[0].data = array.astype(np.float32)  # Save new data
+            hduList1[0].header['NBITS'] = -32;
             hduList1[0].header['MJD-OBS'] = mjdobs
             hduList1[0].header['MJD-END'] = mjdend
             hduList1[0].header['MJD-MID'] = (mjdobs + mjdend) / 2
-            hduList1[0].header['EXPTIME'] = exptime
+            #hduList1[0].header['EXPTIME'] = exptime
             hduList1.writeto(tmpst, overwrite=True)
     return runsolving(ra, dec, tmpst, stackfile)
     
@@ -138,15 +140,14 @@ for f in lightfiles:
                     print("Error: stacking file %s - %s (%s)" % (stackout, e.__class__, e))   
                 timeaccumlist = []
                 timeaccumstart = 0
-            else:
-                # If first one to accumulate, save start time and RA/Dec
-                if (len(timeaccumlist) == 0):
-                    timeaccumstart = tobs
-                    timeaccumra = hduList[0].header['FOVRA']
-                    timeaccumdec = hduList[0].header['FOVDEC']
-                    mjdobs = hduList[0].header['MJD-OBS']
-                timeaccumlist.append(lfile)
-                mjdend = hduList[0].header['MJD-END']
+            # If first one to accumulate, save start time and RA/Dec
+            if (len(timeaccumlist) == 0):
+                timeaccumstart = tobs
+                timeaccumra = hduList[0].header['FOVRA']
+                timeaccumdec = hduList[0].header['FOVDEC']
+                mjdobs = hduList[0].header['MJD-OBS']
+            timeaccumlist.append(lfile)
+            mjdend = hduList[0].header['MJD-END']
         cnt = cnt + 1
     except OSError as e:
         print("Error: file %s - %s (%s)" % (f, e.__class__, e))     
