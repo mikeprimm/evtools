@@ -45,7 +45,6 @@ def runstacking(ra, dec, fitsfiles, stackfile, mjdobs, mjdend):
         "-IMAGEOUT_NAME", tmpst, 
         "-WRITE_XML", "N",
         "-RESAMPLE_DIR", tmppath,
-        "-COMBINE_TYPE", "CLIPPED",
         "-COPY_KEYWORDS", "OBJECT,ORIGIN,MINSYET,TELESCOP,INSTUME,SERIALNB,TIMEUNIT,LATITUDE,LONGITUD,GAIN,GAINDB,ALTITUDE,CMOSTEMP,OBSMODE,DATE,SOFTVER" ]                              
     stackargs.extend(fitsfiles)
     rslt = subprocess.run(stackargs, capture_output=True)

@@ -84,10 +84,13 @@ outputdir='output'
 if args.output: 
     outputdir = args.output
 # Add file logger
+pathlib.Path(outputdir).mkdir(parents=True, exist_ok=True)
 ch2 = logging.FileHandler(os.path.join(outputdir, 'processExoplanetTransit.log'), encoding='utf-8', mode='w')
 ch2.setLevel(logging.DEBUG)
 ch2.setFormatter(formatter)
 logger.addHandler(ch2)
+
+logger.info("args=%s" % args)
 
 darksrcdir='darks'
 if args.darks:
@@ -296,11 +299,13 @@ for f in lightfiles:
                     w = WCS(hduListNew[0].header)
                     shape = hduList[0].data.shape
                     x, y = w.world_to_pixel(target)
+                    y = shape[0] - 1 - y	# Inverted vs what EXOTIC expects
                     if c1 is None:
                        x1 = x
                        y1 = y
                     else:
                        x1, y1 = w.world_to_pixel(c1)
+                       y1 = shape[0] - 1 - y1
                     # If out of range, drop the frame
                     if (x < borderbuffer) or (x >= (shape[0]-borderbuffer)) or (y < borderbuffer) or (y >= (shape[1]-borderbuffer)):
                         rslt = False;
