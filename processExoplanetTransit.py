@@ -9,6 +9,7 @@ from astropy.io import fits
 from astropy.wcs import WCS, FITSFixedWarning
 from astropy.coordinates import SkyCoord, EarthLocation, AltAz
 from astropy.time import Time
+from astropy.wcs.wcs import NoConvergence
 import astropy.units as u
 import cv2
 import numpy as np
@@ -298,14 +299,22 @@ for f in lightfiles:
                 with fits.open(newfits) as hduListNew:
                     w = WCS(hduListNew[0].header)
                     shape = hduList[0].data.shape
-                    x, y = w.world_to_pixel(target)
-                    if c1 is None:
-                       x1 = x
-                       y1 = y
-                    else:
-                       x1, y1 = w.world_to_pixel(c1)
+                    try:
+                        noconv = False
+                        x, y = w.world_to_pixel(target)
+                        if c1 is None:
+                            x1 = x
+                            y1 = y
+                        else:
+                            x1, y1 = w.world_to_pixel(c1)
+                    except NoConvergence as e:
+                        noconv = True
                     # If out of range, drop the frame
-                    if (x < borderbuffer) or (x >= (shape[0]-borderbuffer)) or (y < borderbuffer) or (y >= (shape[1]-borderbuffer)):
+                    if noconv:
+                        rslt = False;
+                        logger.warning("Rejecting - no convergence on frame %s" % (f))
+                        shutil.move(newfits, os.path.join(badsciencepath, f))                    
+                    elif (x < borderbuffer) or (x >= (shape[0]-borderbuffer)) or (y < borderbuffer) or (y >= (shape[1]-borderbuffer)):
                         rslt = False;
                         logger.warning("Rejecting - target out of frame %s (%f, %f)" % (f, x, y))
                         shutil.move(newfits, os.path.join(badsciencepath, f))
