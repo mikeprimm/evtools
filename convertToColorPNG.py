@@ -3,8 +3,10 @@ from genericpath import isfile
 import os
 import pathlib
 from astropy.io import fits
-import cv2
 import numpy as np
+from skimage.color import rgb2gray
+from skimage import io
+from colour_demosaicing import demosaicing_CFA_Bayer_bilinear
 
 # Initialize parser
 parser = argparse.ArgumentParser()
@@ -46,11 +48,12 @@ for f in filelist:
         with fits.open(f) as hduList:
             basename = os.path.splitext(os.path.basename(f))[0]
             # Demosaic the image
-            dat = np.sqrt((hduList[0].data - np.min(hduList[0].data)) / (np.max(hduList[0].data) - np.min(hduList[0].data))) * 65535
-            dat = dat.astype(np.uint16)
-            dst = cv2.cvtColor(dat, cv2.COLOR_BayerRG2RGB)
-            dst = np.flip(dst, 0)  # Flip Y axis for PNG
-            cv2.imwrite(os.path.join(outputdir, "%s.png" % basename), dst)
+            new_image_data = demosaicing_CFA_Bayer_bilinear(hduList[0].data, "RGGB")
+            new_image_data = np.flip(new_image_data, 0)  # Flip Y axis for PNG
+            # Normalize to uint8 range (TODO: offer different ranging options vs sqrt)
+            dat = np.sqrt((new_image_data - np.min(new_image_data)) / (np.max(new_image_data) - np.min(new_image_data))) * 256
+            dat = dat.astype(np.uint8)
+            io.imsave(os.path.join(outputdir, "%s.png" % basename), dat, check_contrast=False)
         cnt = cnt + 1
     except OSError:
         print("Error: file %s" % f)        

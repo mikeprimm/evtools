@@ -11,10 +11,12 @@ from astropy.coordinates import SkyCoord, EarthLocation, AltAz
 from astropy.time import Time
 from astropy.wcs.wcs import NoConvergence
 import astropy.units as u
-import cv2
 import numpy as np
 import subprocess
 import warnings
+from skimage.color import rgb2gray
+from colour_demosaicing import demosaicing_CFA_Bayer_bilinear
+
 # UTC to BJD converter import
 from barycorrpy import utc_tdb
 from pandas import isna
@@ -142,7 +144,7 @@ tobayer = False
 coloridx = 0
 fltname='bayer'
 if args.red:
-    coloridx = 2   # Red
+    coloridx = 0   # Red
     logger.info("Produce red channel FITS files")
     fltname='TR'
 elif args.green:
@@ -150,11 +152,12 @@ elif args.green:
     logger.info("Produce green channel FITS files")
     fltname='TG'
 elif args.blue:
-    coloridx = 0   # Blue
+    coloridx = 2   # Blue
     logger.info("Produce blue channel FITS files")
     fltname='TB'
 elif args.blueblock:
     blueblock = True
+    togray = True
     logger.info("Produce blue-blocked grayscale FITS files")
     fltname='CBB'
 elif args.gray:
@@ -237,22 +240,14 @@ for f in lightfiles:
                 np.subtract(hduList[0].data, dark[0].data, out=hduList[0].data)
             # Now debayer into grayscale                
             if togray:
-                dst = cv2.cvtColor(hduList[0].data, cv2.COLOR_BayerRG2GRAY)
-                for idx, val in enumerate(dst):
-                    hduList[0].data[idx] = val
-            elif blueblock:
-                # Demosaic the image
-                dst = cv2.cvtColor(hduList[0].data, cv2.COLOR_BayerRG2BGR)
-                for idx, val in enumerate(dst):
-                    val[:,0] = 0    # Zero out blue
-                dst = cv2.cvtColor(dst, cv2.COLOR_BGR2GRAY)
-                for idx, val in enumerate(dst):
-                    hduList[0].data[idx] = val
+                new_image_data = demosaicing_CFA_Bayer_bilinear(hduList[0].data, "RGGB")
+                if blueblock:
+                    new_image_data[...,2] = 0
+                hduList[0].data = rgb2gray(new_image_data)
             else:
                 # Demosaic the image
-                dst = cv2.cvtColor(hduList[0].data, cv2.COLOR_BayerRG2BGR)
-                for idx, val in enumerate(dst):
-                    hduList[0].data[idx] = val[:,coloridx]
+                new_image_data = demosaicing_CFA_Bayer_bilinear(hduList[0].data, "RGGB")
+                hduList[0].data = new_image_data[...,coloridx]
             # Compute BJD times
             mjdtimes = np.array([hduList[0].header['MJD-MID']])
             bjdtimes = utc_tdb.JDUTC_to_BJDTDB(mjdtimes + 2400000.5, ra=targetRA, dec=targetDec,
