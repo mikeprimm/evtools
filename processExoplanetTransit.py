@@ -15,7 +15,7 @@ import numpy as np
 import subprocess
 import warnings
 from skimage.color import rgb2gray
-from colour_demosaicing import demosaicing_CFA_Bayer_bilinear
+from colour_demosaicing import demosaicing_CFA_Bayer_Menon2007
 
 # UTC to BJD converter import
 from barycorrpy import utc_tdb
@@ -240,13 +240,13 @@ for f in lightfiles:
                 np.subtract(hduList[0].data, dark[0].data, out=hduList[0].data)
             # Now debayer into grayscale                
             if togray:
-                new_image_data = demosaicing_CFA_Bayer_bilinear(hduList[0].data, "RGGB")
+                new_image_data = demosaicing_CFA_Bayer_Menon2007(hduList[0].data, "RGGB")
                 if blueblock:
                     new_image_data[...,2] = 0
                 hduList[0].data = rgb2gray(new_image_data)
             else:
                 # Demosaic the image
-                new_image_data = demosaicing_CFA_Bayer_bilinear(hduList[0].data, "RGGB")
+                new_image_data = demosaicing_CFA_Bayer_Menon2007(hduList[0].data, "RGGB")
                 hduList[0].data = new_image_data[...,coloridx]
             # Compute BJD times
             mjdtimes = np.array([hduList[0].header['MJD-MID']])

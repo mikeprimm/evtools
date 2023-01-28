@@ -4,7 +4,7 @@ import os
 import pathlib
 from astropy.io import fits
 from skimage.color import rgb2gray
-from colour_demosaicing import demosaicing_CFA_Bayer_bilinear
+from colour_demosaicing import demosaicing_CFA_Bayer_Menon2007
 
 # Initialize parser
 parser = argparse.ArgumentParser()
@@ -76,13 +76,13 @@ for f in filelist:
             basename = os.path.basename(f)
             # DO PROCESSING....
             if togray:
-                new_image_data = demosaicing_CFA_Bayer_bilinear(hduList[0].data, "RGGB")
+                new_image_data = demosaicing_CFA_Bayer_Menon2007(hduList[0].data, "RGGB")
                 if toblueblock:
                     new_image_data[...,2] = 0
                 hduList[0].data = rgb2gray(new_image_data)
             else:
                 # Demosaic the image
-                new_image_data = demosaicing_CFA_Bayer_bilinear(hduList[0].data, "RGGB")
+                new_image_data = demosaicing_CFA_Bayer_Menon2007(hduList[0].data, "RGGB")
                 hduList[0].data = new_image_data[...,coloridx]
             hduList.writeto(os.path.join(outputdir, basename), overwrite=True)
         cnt = cnt + 1
