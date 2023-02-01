@@ -15,7 +15,7 @@ import numpy as np
 import subprocess
 import warnings
 from skimage.color import rgb2gray
-from colour_demosaicing import demosaicing_CFA_Bayer_Menon2007
+from colour_demosaicing import demosaicing_CFA_Bayer_bilinear
 
 # UTC to BJD converter import
 from barycorrpy import utc_tdb
@@ -70,8 +70,9 @@ parser.add_argument('-g', "--green", action='store_true')
 parser.add_argument('-b', "--blue", action='store_true')
 parser.add_argument("-G", "--gray", action='store_true')
 parser.add_argument("-B", "--blueblock", action='store_true')
-parser.add_argument("--ra", help = "Target RA", required = True)
-parser.add_argument("--dec", help = "Target Dec", required = True)
+parser.add_argument("-N", "--nosolve", action='store_true')
+parser.add_argument("--ra", help = "Target RA")
+parser.add_argument("--dec", help = "Target Dec")
 parser.add_argument("--c1ra", help = "Comparison 1 RA")
 parser.add_argument("--c1dec", help = "Comparison 1 Dec")
 parser.add_argument("--obslat", help = "Observatory Latitude (deg)")
@@ -115,10 +116,14 @@ if args.obsalt:
     obsAltitude = float(args.obsalt)
 
 # Get target
-target = SkyCoord(args.ra, args.dec, frame='icrs', unit=(u.hourangle, u.deg))
-targetRA = target.ra.deg
-targetDec = target.dec.deg
-logger.info("Target coords: RA=%d:%d:%f, Dec=%s%d:%d:%f" % (target.ra.hms.h, target.ra.hms.m, target.ra.hms.s, '+' if target.dec.signed_dms.sign >= 0 else '-', target.dec.signed_dms.d, target.dec.signed_dms.m, target.dec.signed_dms.s))
+if args.dec:
+    target = SkyCoord(args.ra, args.dec, frame='icrs', unit=(u.hourangle, u.deg))
+    targetRA = target.ra.deg
+    targetDec = target.dec.deg
+    logger.info("Target coords: RA=%d:%d:%f, Dec=%s%d:%d:%f" % (target.ra.hms.h, target.ra.hms.m, target.ra.hms.s, '+' if       target.dec.signed_dms.sign >= 0 else '-', target.dec.signed_dms.d, target.dec.signed_dms.m, target.dec.signed_dms.s))
+else:
+    targetRA = None
+    targetDec = None
 
 c1 = None
 if args.c1ra:
@@ -143,6 +148,7 @@ blueblock = False
 tobayer = False
 coloridx = 0
 fltname='bayer'
+solve = True
 if args.red:
     coloridx = 0   # Red
     logger.info("Produce red channel FITS files")
@@ -168,6 +174,8 @@ else:
     tobayer = True
     logger.info("Produce Bayer FITS files")
     fltname='BAYER'
+if args.nosolve:
+    solve = False
 darkfiles = []
 # Go through the darks
 for path in os.listdir(darksrcdir):
@@ -239,37 +247,40 @@ for f in lightfiles:
                 # And subtract the dark
                 np.subtract(hduList[0].data, dark[0].data, out=hduList[0].data)
             # Now debayer into grayscale                
+            img_dtype = hduList[0].data.dtype
             if togray:
-                new_image_data = demosaicing_CFA_Bayer_Menon2007(hduList[0].data, "RGGB")
+                new_image_data = demosaicing_CFA_Bayer_bilinear(hduList[0].data, "RGGB")
                 if blueblock:
                     new_image_data[...,2] = 0
-                hduList[0].data = rgb2gray(new_image_data)
-            else:
+                hduList[0].data = rgb2gray(new_image_data).astype(img_dtype)
+            elif not tobayer:
                 # Demosaic the image
-                new_image_data = demosaicing_CFA_Bayer_Menon2007(hduList[0].data, "RGGB")
-                hduList[0].data = new_image_data[...,coloridx]
+                new_image_data = demosaicing_CFA_Bayer_bilinear(hduList[0].data, "RGGB")
+                hduList[0].data = new_image_data[...,coloridx].astype(img_dtype)
             # Compute BJD times
-            mjdtimes = np.array([hduList[0].header['MJD-MID']])
-            bjdtimes = utc_tdb.JDUTC_to_BJDTDB(mjdtimes + 2400000.5, ra=targetRA, dec=targetDec,
-                        lat=obsLatitude, longi=obsLongitude, alt=obsAltitude)[0]
-            hduList[0].header.set('BJD_TDB', bjdtimes[0], "barycentric Julian date of the mid obs")
+            if targetRA:
+                jdtimes = np.array([hduList[0].header['MJD-MID']])
+                bjdtimes = utc_tdb.JDUTC_to_BJDTDB(mjdtimes + 2400000.5, ra=targetRA, dec=targetDec,
+                    lat=obsLatitude, longi=obsLongitude, alt=obsAltitude)[0]
+                hduList[0].header.set('BJD_TDB', bjdtimes[0], "barycentric Julian date of the mid obs")
+                # Add alt-az for target
+                altaz = calcAltAz(targetRA, targetDec, obsLatitude, obsLongitude, obsAltitude, mjdtimes[0])
+                # Add AIRMASS
+                hduList[0].header.set('AIRMASS', float(altaz.secz))
+                # Add RAOBJ2K, DECOBJ2K, SITELAT, SITELONG, ALT_OBJ, AZ_OBJ, ZD_OBJ
+                hduList[0].header.set('SITELAT', obsLatitude, "geographic latitude of observatory")
+                hduList[0].header.set('SITELONG', obsLongitude, "geographic longitude of observatory")
+                hduList[0].header.set('RAOBJ2K', targetRA / 15, "J2000 right ascension of target (hours)")
+                hduList[0].header.set('DECOBJ2K', targetDec, "J2000 declination of target (degrees)")
+                hduList[0].header.set('ALT_OBJ', float(altaz.alt.deg), "Target altitude at mid-exposure")
+                hduList[0].header.set('AZ_OBJ', float(altaz.az.deg), "Target azimuth at mid-exposure")
+                hduList[0].header.set('ZD_OBJ', 90.0 - float(altaz.alt.deg), "Target zenith distance at mid-exposure")
+
             # Add bayer header if leaving as bayer file
             if tobayer:
                 hduList[0].header.set('BAYERPAT', 'RGGB')
                 hduList[0].header.set('XBAYROFF', 0)
                 hduList[0].header.set('YBAYROFF', 0)
-            # Add alt-az for target
-            altaz = calcAltAz(targetRA, targetDec, obsLatitude, obsLongitude, obsAltitude, mjdtimes[0])
-            # Add AIRMASS
-            hduList[0].header.set('AIRMASS', float(altaz.secz))
-            # Add RAOBJ2K, DECOBJ2K, SITELAT, SITELONG, ALT_OBJ, AZ_OBJ, ZD_OBJ
-            hduList[0].header.set('SITELAT', obsLatitude, "geographic latitude of observatory")
-            hduList[0].header.set('SITELONG', obsLongitude, "geographic longitude of observatory")
-            hduList[0].header.set('RAOBJ2K', targetRA / 15, "J2000 right ascension of target (hours)")
-            hduList[0].header.set('DECOBJ2K', targetDec, "J2000 declination of target (degrees)")
-            hduList[0].header.set('ALT_OBJ', float(altaz.alt.deg), "Target altitude at mid-exposure")
-            hduList[0].header.set('AZ_OBJ', float(altaz.az.deg), "Target azimuth at mid-exposure")
-            hduList[0].header.set('ZD_OBJ', 90.0 - float(altaz.alt.deg), "Target zenith distance at mid-exposure")
             if ('ALTITUDE' in hduList[0].header) == False:
                 hduList[0].header.set('ALTITUDE', obsAltitude, "altitude in meters of observing site")
             if ('LATITUDE' in hduList[0].header) == False:
@@ -282,14 +293,18 @@ for f in lightfiles:
             newfits = os.path.join(sciencepath, newfname)
             # Write to temporary file so that we can run solve-field to
             # set WCS data
-            hduList.writeto(os.path.join(tmppath, "tmp.fits"), overwrite=True)
-            # Now run solve-field to generate final file
-            rslt = runsolving(hduList[0].header['FOVRA'], hduList[0].header['FOVDEC'],
-                os.path.join(tmppath, "tmp.fits"), newfits )
+            if solve:
+                hduList.writeto(os.path.join(tmppath, "tmp.fits"), overwrite=True)
+                # Now run solve-field to generate final file
+                rslt = runsolving(hduList[0].header['FOVRA'], hduList[0].header['FOVDEC'],
+                    os.path.join(tmppath, "tmp.fits"), newfits )
+            else:
+                hduList.writeto(newfits, overwrite=True)
+                cnt = cnt + 1
             if rslt == False:
                 print("Error solving %s - skipping" % f)
                 hduList.writeto(os.path.join(badsciencepath, f), overwrite=True)
-            else:
+            elif targetRA:
                 solvedcnt = solvedcnt + 1
                 with fits.open(newfits) as hduListNew:
                     w = WCS(hduListNew[0].header)
