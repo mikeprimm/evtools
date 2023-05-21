@@ -5,7 +5,7 @@ import pathlib
 from astropy.io import fits
 import numpy as np
 from skimage import io
-from colour_demosaicing import demosaicing_CFA_Bayer_Menon2007
+from colour_demosaicing import demosaicing_CFA_Bayer_bilinear
 
 # Initialize parser
 parser = argparse.ArgumentParser()
@@ -47,7 +47,7 @@ for f in filelist:
         with fits.open(f) as hduList:
             basename = os.path.splitext(os.path.basename(f))[0]
             # Demosaic the image
-            new_image_data = demosaicing_CFA_Bayer_Menon2007(hduList[0].data, "RGGB")
+            new_image_data = demosaicing_CFA_Bayer_bilinear(hduList[0].data, "RGGB")
             new_image_data = np.flip(new_image_data, 0)  # Flip Y axis for PNG
             # Normalize to uint8 range (TODO: offer different ranging options vs sqrt)
             dat = np.sqrt((new_image_data - np.min(new_image_data)) / (np.max(new_image_data) - np.min(new_image_data))) * 256

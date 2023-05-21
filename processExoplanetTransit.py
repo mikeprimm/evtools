@@ -14,7 +14,6 @@ import astropy.units as u
 import numpy as np
 import subprocess
 import warnings
-from skimage.color import rgb2gray
 from colour_demosaicing import demosaicing_CFA_Bayer_bilinear
 
 # UTC to BJD converter import
@@ -41,7 +40,7 @@ def runsolving(ra, dec, infile, outfile):
             "--radius", "5",
             "--fits-image", "--guess-scale",
             "--new-fits", outfile ], 
-            timeout=10, capture_output=True)
+            timeout=60, capture_output=True)
         if rslt.returncode != 0:
             logger.error("Error solving %s - skipping" % f)
             return False
@@ -149,31 +148,35 @@ tobayer = False
 coloridx = 0
 fltname='bayer'
 solve = True
+
 if args.red:
-    coloridx = 0   # Red
-    logger.info("Produce red channel FITS files")
+    # Red
+    colorweight = np.array([ 1, 0, 0 ])
     fltname='TR'
+    print("Produce red channel FITS files")
 elif args.green:
-    coloridx = 1   # Green
-    logger.info("Produce green channel FITS files")
+    # Green
+    colorweight = np.array([ 0, 1, 0 ])
     fltname='TG'
+    print("Produce green channel FITS files")
 elif args.blue:
-    coloridx = 2   # Blue
-    logger.info("Produce blue channel FITS files")
+    # Blue
+    colorweight = np.array([ 0, 0, 1 ]);
     fltname='TB'
+    print("Produce blue channel FITS files")
 elif args.blueblock:
-    blueblock = True
-    togray = True
-    logger.info("Produce blue-blocked grayscale FITS files")
+    colorweight = np.array([ 0.2125, 0.7154, 0 ]);
     fltname='CBB'
+    print("Produce blueblocked grayscale FITS files")
 elif args.gray:
-    togray = True
-    logger.info("Produce grayscale FITS files")
+    colorweight = np.array([ 0.2125, 0.7154, 0.0721 ]);
     fltname='CV'
+    print("Produce grayscale FITS files")
 else:
     tobayer = True
     logger.info("Produce Bayer FITS files")
     fltname='BAYER'
+
 if args.nosolve:
     solve = False
 darkfiles = []
@@ -248,18 +251,14 @@ for f in lightfiles:
                 np.subtract(hduList[0].data, dark[0].data, out=hduList[0].data)
             # Now debayer into grayscale                
             img_dtype = hduList[0].data.dtype
-            if togray:
-                new_image_data = demosaicing_CFA_Bayer_bilinear(hduList[0].data, "RGGB")
-                if blueblock:
-                    new_image_data[...,2] = 0
-                hduList[0].data = rgb2gray(new_image_data).astype(img_dtype)
-            elif not tobayer:
+            if not tobayer:
                 # Demosaic the image
                 new_image_data = demosaicing_CFA_Bayer_bilinear(hduList[0].data, "RGGB")
-                hduList[0].data = new_image_data[...,coloridx].astype(img_dtype)
+                new_image_data = new_image_data @ colorweight
+                hduList[0].data = new_image_data.astype(img_dtype)
             # Compute BJD times
             if targetRA:
-                jdtimes = np.array([hduList[0].header['MJD-MID']])
+                mjdtimes = np.array([hduList[0].header['MJD-MID']])
                 bjdtimes = utc_tdb.JDUTC_to_BJDTDB(mjdtimes + 2400000.5, ra=targetRA, dec=targetDec,
                     lat=obsLatitude, longi=obsLongitude, alt=obsAltitude)[0]
                 hduList[0].header.set('BJD_TDB', bjdtimes[0], "barycentric Julian date of the mid obs")

@@ -2,9 +2,9 @@ import argparse
 from genericpath import isfile
 import os
 import pathlib
+import numpy as np
 from astropy.io import fits
-from skimage.color import rgb2gray
-from colour_demosaicing import demosaicing_CFA_Bayer_Menon2007
+from colour_demosaicing import demosaicing_CFA_Bayer_bilinear
 
 # Initialize parser
 parser = argparse.ArgumentParser()
@@ -46,24 +46,23 @@ pathlib.Path(outputdir).mkdir(parents=True, exist_ok=True)
 
 print("Found %d FITS files" % len(filelist))
 
-togray = False
-toblueblock = False
-coloridx = 0
 if args.red:
-    coloridx = 0   # Red
+    # Red
+    colorweight = np.array([ 1, 0, 0 ]);
     print("Produce red channel FITS files")
 elif args.green:
-    coloridx = 1   # Green
+    # Green
+    colorweight = np.array([ 0, 1, 0 ]);
     print("Produce green channel FITS files")
 elif args.blue:
-    coloridx = 2   # Blue
+    # Blue
+    colorweight = np.array([ 0, 0, 1 ]);
     print("Produce blue channel FITS files")
 elif args.blueblock:
-    toblueblock = True
-    togray = True
+    colorweight = np.array([ 0.2125, 0.7154, 0 ]);
     print("Produce blueblocked grayscale FITS files")
 else:
-    togray = True
+    colorweight = np.array([ 0.2125, 0.7154, 0.0721 ]);
     print("Produce grayscale FITS files")
 
 
@@ -74,16 +73,12 @@ for f in filelist:
         # Load file into list of HDU list 
         with fits.open(f) as hduList:
             basename = os.path.basename(f)
+            img_dtype = hduList[0].data.dtype    # Save data type
+            ourtype = hduList[0].data
             # DO PROCESSING....
-            if togray:
-                new_image_data = demosaicing_CFA_Bayer_Menon2007(hduList[0].data, "RGGB")
-                if toblueblock:
-                    new_image_data[...,2] = 0
-                hduList[0].data = rgb2gray(new_image_data)
-            else:
-                # Demosaic the image
-                new_image_data = demosaicing_CFA_Bayer_Menon2007(hduList[0].data, "RGGB")
-                hduList[0].data = new_image_data[...,coloridx]
+            new_image_data = demosaicing_CFA_Bayer_bilinear(hduList[0].data, "RGGB")
+            new_image_data = new_image_data @ colorweight
+            hduList[0].data = new_image_data.astype(img_dtype)
             hduList.writeto(os.path.join(outputdir, basename), overwrite=True)
         cnt = cnt + 1
     except OSError:
