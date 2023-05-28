@@ -69,6 +69,7 @@ parser.add_argument('-g', "--green", action='store_true')
 parser.add_argument('-b', "--blue", action='store_true')
 parser.add_argument("-G", "--gray", action='store_true')
 parser.add_argument("-B", "--blueblock", action='store_true')
+parser.add_argument('-A', "--all", action='store_true')
 parser.add_argument("-N", "--nosolve", action='store_true')
 parser.add_argument("--ra", help = "Target RA")
 parser.add_argument("--dec", help = "Target Dec")
@@ -145,14 +146,27 @@ pathlib.Path(tmppath).mkdir(parents=True, exist_ok=True)
 togray = False
 blueblock = False
 tobayer = False
+toall = False
 coloridx = 0
 fltname='bayer'
 solve = True
 
-if args.red:
+if args.all:
+    toall = True
+    fltname='BAYER'  # Initial file is bayer
+    print("Produce red, green, blue, gray channel FITS files")
+    redpath = os.path.join(sciencepath, "red")
+    greenpath = os.path.join(sciencepath, "green")
+    bluepath = os.path.join(sciencepath, "blue")
+    graypath = os.path.join(sciencepath, "gray")
+    pathlib.Path(redpath).mkdir(parents=True, exist_ok=True)
+    pathlib.Path(greenpath).mkdir(parents=True, exist_ok=True)
+    pathlib.Path(bluepath).mkdir(parents=True, exist_ok=True)
+    pathlib.Path(graypath).mkdir(parents=True, exist_ok=True)
+elif args.red:
     # Red
     colorweight = np.array([ 1, 0, 0 ])
-    fltname='TR'
+    fltname='CR'
     print("Produce red channel FITS files")
 elif args.green:
     # Green
@@ -251,7 +265,7 @@ for f in lightfiles:
                 np.subtract(hduList[0].data, dark[0].data, out=hduList[0].data)
             # Now debayer into grayscale                
             img_dtype = hduList[0].data.dtype
-            if not tobayer:
+            if not tobayer and not toall:
                 # Demosaic the image
                 new_image_data = demosaicing_CFA_Bayer_bilinear(hduList[0].data, "RGGB")
                 new_image_data = new_image_data @ colorweight
@@ -338,6 +352,34 @@ for f in lightfiles:
                                 logger.info("Pixel coordinate of comparison 1: %f, %f" % (x1, y1))
                             printfirst = False
                         cnt = cnt + 1
+            # If good result AND we are doing toall, generate different versions
+            if rslt and toall:
+                with fits.open(newfits) as hduListNew:
+                    new_image_data = demosaicing_CFA_Bayer_bilinear(hduList[0].data, "RGGB")
+                    # Make red
+                    red_image_data = new_image_data @ np.array([ 1, 0, 0 ])
+                    hduList[0].data = red_image_data.astype(img_dtype)
+                    newfname = "science-{1}-{0:05d}.fits".format(cnt, "CR")
+                    newfits = os.path.join(redpath, newfname)
+                    hduList.writeto(newfits, overwrite=True)
+                    # Make green
+                    green_image_data = new_image_data @ np.array([ 0, 1, 0 ])
+                    hduList[0].data = green_image_data.astype(img_dtype)
+                    newfname = "science-{1}-{0:05d}.fits".format(cnt, "CG")
+                    newfits = os.path.join(greenpath, newfname)
+                    hduList.writeto(newfits, overwrite=True)
+                    # Make blue
+                    blue_image_data = new_image_data @ np.array([ 0, 0, 1 ])
+                    hduList[0].data = blue_image_data.astype(img_dtype)
+                    newfname = "science-{1}-{0:05d}.fits".format(cnt, "CB")
+                    newfits = os.path.join(bluepath, newfname)
+                    hduList.writeto(newfits, overwrite=True)
+                    # Make gray
+                    gray_image_data = new_image_data @ np.array([ 0.2125, 0.7154, 0.0721 ])
+                    hduList[0].data = gray_image_data.astype(img_dtype)
+                    newfname = "science-{1}-{0:05d}.fits".format(cnt, "CV")
+                    newfits = os.path.join(graypath, newfname)
+                    hduList.writeto(newfits, overwrite=True)
     except OSError as e:
         logger.error("Error: file %s - %s (%s)" % (f, e.__class__, e))     
 
