@@ -61,6 +61,8 @@ parser = argparse.ArgumentParser()
 # Add input argument
 parser.add_argument("-d", "--darks", help = "Dark files source directory");
 parser.add_argument("-s", "--science", help = "Science files source directory");
+parser.add_argument("-df", "--darkflats", help = "Dark flat files source directory");
+parser.add_argument("-f", "--flats", help = "Flat files source directory");
 # Adding output argument
 parser.add_argument("-o", "--output", help = "Output directory") 
 # Add flags (default is grey - others for monochrome)
@@ -102,6 +104,13 @@ if args.darks:
 sciencesrcdir='science'
 if args.science:
     sciencesrcdir = args.science
+darkflatsrcdir='darkflats'
+if args.darkflats:
+    darkflatsrcdir = args.darkflats
+flatsrcdir='flats'
+if args.flats:
+    flatsrcdir = args.flats
+
 borderbuffer = 20
 if args.borderbuffer:
     borderbuffer = args.borderbuffer
@@ -142,6 +151,10 @@ badsciencepath = os.path.join(outputdir, "science-rej")
 pathlib.Path(badsciencepath).mkdir(parents=True, exist_ok=True)
 tmppath = os.path.join(outputdir, "tmp")
 pathlib.Path(tmppath).mkdir(parents=True, exist_ok=True)
+darkflatpath = os.path.join(outputdir, "darkflats")
+pathlib.Path(darkflatpath).mkdir(parents=True, exist_ok=True)
+flatpath = os.path.join(outputdir, "flats")
+pathlib.Path(flatpath).mkdir(parents=True, exist_ok=True)
 
 togray = False
 blueblock = False
@@ -211,10 +224,29 @@ for path in os.listdir(sciencesrcdir):
     if os.path.isfile(dfile):
         lightfiles.append(path)
 lightfiles.sort()
-dark = fits.HDUList()
+# Do dark flats, if any
+darkflatfiles = []
+for path in os.listdir(darkflatsrcdir):
+    dfile = os.path.join(darkflatsrcdir, path)
+    if (path.startswith('.')): continue
+    # check if current path is a file
+    if os.path.isfile(dfile):
+        darkflatfiles.append(path)
+darkflatfiles.sort()
+# Do flats, if any
+flatfiles = []
+for path in os.listdir(flatsrcdir):
+    dfile = os.path.join(flatsrcdir, path)
+    if (path.startswith('.')): continue
+    # check if current path is a file
+    if os.path.isfile(dfile):
+        flatfiles.append(path)
+flatfiles.sort()
 
 # Build dark frame, if we have any to work with
+dark = fits.HDUList()
 if len(darkfiles) > 0:
+    logger.info(f"Processing {len(darkfiles)} darks")
     for f in darkfiles:
         try:
             dfile = os.path.join(darksrcdir, f)
@@ -233,6 +265,63 @@ if len(darkfiles) > 0:
     dark[0].data = darkaccum.astype(np.uint16)
     # And write output dark
     dark.writeto(os.path.join(darkpath, "master-dark.fits"), overwrite=True)
+
+# Build dark flat frame, if we have any to work with
+darkflat = fits.HDUList()
+if len(darkflatfiles) > 0:
+    logger.info(f"Processing {len(darkflatfiles)} dark-flats")
+    for f in darkflatfiles:
+        try:
+            dfile = os.path.join(darkflatsrcdir, f)
+            # Load file into list of HDU list 
+            with fits.open(dfile) as hduList:
+                # Use first one as base
+                if len(darkflat) == 0:
+                    darkflataccum = np.zeros((0,) + hduList[0].data.shape)
+                    darkflat.append(hduList[0].copy())
+                darkflataccum = np.append(darkflataccum, [ hduList[0].data ], axis=0)
+                hduList.writeto(os.path.join(darkflatpath, f), overwrite=True)
+        except OSError:
+            logging.error("Error: file %s" % f)        
+    # Now compute median for each pixel
+    darkflataccum = np.median(darkflataccum, axis=0)
+    darkflat[0].data = darkflataccum.astype(np.uint16)
+    # And write output dark flat
+    darkflat.writeto(os.path.join(darkflatpath, "master-darkflat.fits"), overwrite=True)
+
+# Build flat frame, if we have any to work with
+flat = fits.HDUList()
+if len(flatfiles) > 0:
+    logger.info(f"Processing {len(flatfiles)} flats")
+    for f in flatfiles:
+        try:
+            dfile = os.path.join(flatsrcdir, f)
+            # Load file into list of HDU list 
+            with fits.open(dfile) as hduList:
+                # Use first one as base
+                if len(flat) == 0:
+                    flataccum = np.zeros((0,) + hduList[0].data.shape)
+                    flat.append(hduList[0].copy())
+                flataccum = np.append(flataccum, [ hduList[0].data ], axis=0)
+                hduList.writeto(os.path.join(flatpath, f), overwrite=True)
+        except OSError:
+            logging.error("Error: file %s" % f)        
+    # Now compute median for each pixel
+    flataccum = np.median(flataccum, axis=0)
+    # If we have dark flat, subtract it
+    if len(darkflat) > 0:
+        # Clamp the data with the dark from below, so we can subtract without rollover
+        np.maximum(flataccum, darkflat[0].data, out=flataccum)
+        # And subtract the dark
+        np.subtract(flataccum, darkflat[0].data, out=flataccum)
+    # And write output dark flat
+    flat.writeto(os.path.join(flatpath, "master-flat.fits"), overwrite=True)
+    # And normalize the flat
+    medi = np.median(flataccum)
+    normflataccum = flataccum / medi
+    # Handle any zero pixels (avoid divide by zero)
+    normflataccum[normflataccum == 0] = 1
+    flat[0].data = normflataccum.astype(np.float32)
 
 cnt = 0
 solvedcnt = 0
@@ -263,8 +352,13 @@ for f in lightfiles:
                 np.maximum(hduList[0].data, dark[0].data, out=hduList[0].data)
                 # And subtract the dark
                 np.subtract(hduList[0].data, dark[0].data, out=hduList[0].data)
-            # Now debayer into grayscale                
+            # Remember base type
             img_dtype = hduList[0].data.dtype
+            # If we have flat, apply it
+            if len(flat) > 0:
+                normalized = hduList[0].data / flat[0].data
+                hduList[0].data = normalized.astype(img_dtype)
+            # Now debayer into grayscale                
             if not tobayer and not toall:
                 # Demosaic the image
                 new_image_data = demosaicing_CFA_Bayer_bilinear(hduList[0].data, "RGGB")
