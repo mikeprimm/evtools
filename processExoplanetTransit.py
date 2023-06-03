@@ -315,13 +315,14 @@ if len(flatfiles) > 0:
         # And subtract the dark
         np.subtract(flataccum, darkflat[0].data, out=flataccum)
     # And write output dark flat
+    flat[0].data = flataccum.astype(np.uint16)
     flat.writeto(os.path.join(flatpath, "master-flat.fits"), overwrite=True)
     # And normalize the flat
+    flataccum = flataccum.astype(np.float32)
     medi = np.median(flataccum)
     normflataccum = flataccum / medi
     # Handle any zero pixels (avoid divide by zero)
     normflataccum[normflataccum == 0] = 1
-    flat[0].data = normflataccum.astype(np.float32)
 
 cnt = 0
 solvedcnt = 0
@@ -356,7 +357,7 @@ for f in lightfiles:
             img_dtype = hduList[0].data.dtype
             # If we have flat, apply it
             if len(flat) > 0:
-                normalized = hduList[0].data / flat[0].data
+                normalized = hduList[0].data.astype(np.float32) / normflataccum
                 hduList[0].data = normalized.astype(img_dtype)
             # Now debayer into grayscale                
             if not tobayer and not toall:
@@ -448,7 +449,7 @@ for f in lightfiles:
                         cnt = cnt + 1
             # If good result AND we are doing toall, generate different versions
             if rslt and toall:
-                with fits.open(newfits) as hduListNew:
+                with fits.open(newfits) as hduList:
                     new_image_data = demosaicing_CFA_Bayer_bilinear(hduList[0].data, "RGGB")
                     # Make red
                     red_image_data = new_image_data @ np.array([ 1, 0, 0 ])
