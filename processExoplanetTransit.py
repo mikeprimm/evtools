@@ -104,10 +104,10 @@ if args.darks:
 sciencesrcdir='science'
 if args.science:
     sciencesrcdir = args.science
-darkflatsrcdir='darkflats'
+darkflatsrcdir=None
 if args.darkflats:
     darkflatsrcdir = args.darkflats
-flatsrcdir='flats'
+flatsrcdir=None
 if args.flats:
     flatsrcdir = args.flats
 
@@ -151,10 +151,12 @@ badsciencepath = os.path.join(outputdir, "science-rej")
 pathlib.Path(badsciencepath).mkdir(parents=True, exist_ok=True)
 tmppath = os.path.join(outputdir, "tmp")
 pathlib.Path(tmppath).mkdir(parents=True, exist_ok=True)
-darkflatpath = os.path.join(outputdir, "darkflats")
-pathlib.Path(darkflatpath).mkdir(parents=True, exist_ok=True)
-flatpath = os.path.join(outputdir, "flats")
-pathlib.Path(flatpath).mkdir(parents=True, exist_ok=True)
+if args.darkflats:
+   darkflatpath = os.path.join(outputdir, "darkflats")
+   pathlib.Path(darkflatpath).mkdir(parents=True, exist_ok=True)
+if args.flats:
+   flatpath = os.path.join(outputdir, "flats")
+   pathlib.Path(flatpath).mkdir(parents=True, exist_ok=True)
 
 togray = False
 blueblock = False
@@ -226,22 +228,24 @@ for path in os.listdir(sciencesrcdir):
 lightfiles.sort()
 # Do dark flats, if any
 darkflatfiles = []
-for path in os.listdir(darkflatsrcdir):
-    dfile = os.path.join(darkflatsrcdir, path)
-    if (path.startswith('.')): continue
-    # check if current path is a file
-    if os.path.isfile(dfile):
-        darkflatfiles.append(path)
-darkflatfiles.sort()
+if darkflatsrcdir:
+    for path in os.listdir(darkflatsrcdir):
+        dfile = os.path.join(darkflatsrcdir, path)
+        if (path.startswith('.')): continue
+        # check if current path is a file
+        if os.path.isfile(dfile):
+            darkflatfiles.append(path)
+    darkflatfiles.sort()
 # Do flats, if any
 flatfiles = []
-for path in os.listdir(flatsrcdir):
-    dfile = os.path.join(flatsrcdir, path)
-    if (path.startswith('.')): continue
-    # check if current path is a file
-    if os.path.isfile(dfile):
-        flatfiles.append(path)
-flatfiles.sort()
+if flatsrcdir:
+    for path in os.listdir(flatsrcdir):
+        dfile = os.path.join(flatsrcdir, path)
+        if (path.startswith('.')): continue
+        # check if current path is a file
+        if os.path.isfile(dfile):
+            flatfiles.append(path)
+    flatfiles.sort()
 
 # Build dark frame, if we have any to work with
 dark = fits.HDUList()
