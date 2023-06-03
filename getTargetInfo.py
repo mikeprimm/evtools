@@ -2,11 +2,16 @@ import argparse
 from genericpath import isfile
 import os
 import logging
-import warnings
 from datetime import datetime, timezone
 from math import log10, floor
-from tenacity import retry, stop_after_delay
-import requests
+try:
+    from .libs.unistellar import unistellarBestGainAndExp, unstellarExoplanetURL
+except ImportError:  # package import
+    from libs.unistellar import unistellarBestGainAndExp, unstellarExoplanetURL
+try:
+    from .libs.exofop import exofop_getcompositeinfo, exofop_getticid, currentRADec
+except ImportError: 
+    from libs.exofop import exofop_getcompositeinfo, exofop_getticid, currentRADec
 
 # create logger
 logger = logging.getLogger('getTargetInfo')
@@ -17,89 +22,6 @@ formatter = logging.Formatter('%(asctime)s %(levelname)s - %(message)s')
 ch.setFormatter(formatter)
 logger.addHandler(ch)
 
-@retry(stop=stop_after_delay(30))
-def exofop_getticid(tgtname):
-    try:
-        url = f"https://exofop.ipac.caltech.edu/tess/gototicid.php?target={tgtname}&json"
-        result = requests.get(url)
-        rsp = result.json()
-        if rsp['status'] == 'OK':
-            return rsp['TIC']
-        else:
-            logger.error(f"EXOFOP error: {rsp['message']}")
-            return None
-    except Exception as e:
-        logger.error(f"EXOFOP error: ${e}")
-        return None
-
-@retry(stop=stop_after_delay(30))
-def exofop_getcompositeinfo(tic):
-    try:
-        url = f"https://exofop.ipac.caltech.edu/tess/download_target.php?id={tic}"
-        result = requests.get(url)
-        rsp = result.text.splitlines()
-        ra2015 = None
-        dec2015 = None
-        pra = None
-        pdec = None
-        vmag = None
-        for line in rsp:
-            if line.startswith("RA (J2015.5)"):
-                sline = line[12:].strip().split(" ")
-                ra2015 = float(sline[2])
-            elif line.startswith("Dec (J2015.5)"):
-                sline = line[13:].strip().split(" ")
-                dec2015 = float(sline[2])
-            elif line.startswith("Proper Motion RA (mas/yr)"):
-                sline = line[25:].strip().split(" ")
-                pra = float(sline[0])
-            elif line.startswith("Proper Motion Dec (mas/yr)"):
-                sline = line[26:].strip().split(" ")
-                pdec = float(sline[0])
-            elif line.startswith("V     "):
-                sline = line[6:].strip().split(" ")
-                vmag = float(sline[0])
-        return ra2015, dec2015, pra, pdec, vmag
-    except Exception as e:
-        logger.error(f"EXOFOP error: {e}")
-        return None, None, None, None, None
-
-def currentRADec(ra, dec, pra, pdec):
-    # Compute position given current time vs J2015.5
-    now = datetime.now(timezone.utc)
-    j2015_5 = datetime(2015,7,1,0,0,0,0, timezone.utc)
-    elapsed_yrs = (now - j2015_5).total_seconds() / 31557600
-    # Adjust for proper motion (milliarcsec to degrees)
-    curRA = ra + (elapsed_yrs * pra / 3600000.0)
-    curDec = dec + (elapsed_yrs * pdec / 3600000.0)
-
-    return curRA, curDec
-
-# Constants from unistellar spreadsheet
-baselineExp = 3200.0
-baselineGain = 25.0
-baselinePeakPixelADU = 3000.0
-baselineVmag = 11.7
-deltaGain = 5.0
-fluxChangeFactor = 1.122 ** deltaGain
-
-def unistellarFluxFromBaseFactor(vmag, exptime):
-    return (10 ** ((vmag - baselineVmag)/-2.5)) * (float(exptime)/baselineExp)
-def unistellarMaxGain(vmag, exptime):
-    return baselineGain - (log10(unistellarFluxFromBaseFactor(vmag, exptime))/log10(1.122))
-def unistellarBestGain(vmag, exptime):
-    return floor(unistellarMaxGain(vmag, exptime)) - 1
-def unistellarBestGainAndExp(vmag):
-    exptime = 3970
-    bestgain = None
-    while exptime >= 1000:
-        bestgain = unistellarBestGain(vmag, exptime)
-        if (bestgain >= 1):
-            return bestgain, exptime
-        # Go down by hundreds
-        exptime = floor((exptime - 100) / 100) * 100        
-    return bestgain, exptime
-    
 # Initialize parser
 parser = argparse.ArgumentParser()
 parser.add_argument("--target", help = "Target Name", required = True)
@@ -123,3 +45,6 @@ if tic:
     logger.info(f"V (mag) = {vmag}")
     bestgain, exptime = unistellarBestGainAndExp(vmag)
     logger.info(f"Unistellar: best gain = {bestgain} db, exposure time = {exptime} ms")
+
+url = unstellarExoplanetURL(args.target)
+logger.info(f"Unistellar URL (for 1 hour): {url}")
