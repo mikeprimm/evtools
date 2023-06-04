@@ -43,7 +43,7 @@ def runsolving(ra, dec, infile, outfile):
         #logger.info(f"args={args}")
         rslt = subprocess.run(args, 
             timeout=60, capture_output=True)
-        if rslt.returncode != 0:
+        if rslt.returncode != 0 or (not isfile(outfile)):
             logger.error("Error solving %s - skipping" % f)
             return False
         return True
@@ -329,7 +329,8 @@ if len(flatfiles) > 0:
     normflataccum = flataccum / medi
     # Handle any zero pixels (avoid divide by zero)
     normflataccum[normflataccum == 0] = 1
-
+    #logger.info(f"normflataccum={normflataccum}")
+    
 cnt = 0
 solvedcnt = 0
 timeaccumlist = []
@@ -343,6 +344,8 @@ printfirst = True
 for f in lightfiles:
     try:
         lfile = os.path.join(sciencesrcdir, f)
+        newfname = "science-{1}-{0:05d}.fits".format(cnt, fltname)
+        newfits = os.path.join(sciencepath, newfname)
         # Load file into list of HDU list 
         with fits.open(lfile) as hduList:
             if obsAltitude is None:
@@ -353,8 +356,23 @@ for f in lightfiles:
                 obsLongitude = hduList[0].header['LONGITUD']
             if cnt == 0:
                 logger.info("Observatory: Lat={0} deg, Lon={1} deg, Alt={2} meters".format(obsLatitude, obsLongitude, obsAltitude))
+            if solve:
+                hduList.writeto(os.path.join(tmppath, "tmp.fits"), overwrite=True)
+            else:
+                hduList.writeto(newfits, overwrite=True)
+        rslt = True
+        if solve:
+            # Now run solve-field to generate final file
+            rslt = runsolving(hduList[0].header['FOVRA'], hduList[0].header['FOVDEC'],
+                os.path.join(tmppath, "tmp.fits"), newfits )
+        if rslt == False:
+            print("Error solving %s - skipping" % f)
+            hduList.writeto(os.path.join(badsciencepath, f), overwrite=True)
+            continue
+        with fits.open(newfits) as hduList:
             # Remember base type
-            img_dtype = hduList[0].data.dtype
+            #img_dtype = hduList[0].data.dtype
+            img_dtype = np.float32
             # First, calibrate image
             if len(dark) > 0:
                 # Clamp the data with the dark from below, so we can subtract without rollover
@@ -364,6 +382,7 @@ for f in lightfiles:
             # If we have flat, apply it
             if len(flat) > 0:
                 hduList[0].data = hduList[0].data.astype(np.float32) / normflataccum
+
             # Now debayer into grayscale                
             if not tobayer:
                 # Demosaic the image
@@ -400,89 +419,77 @@ for f in lightfiles:
             if ('LONGITUD' in hduList[0].header) == False:
                 hduList[0].header.set('LONGITUD', obsLongitude, "longitude in degrees east of observing site")
 
-            rslt = True
-            newfname = "science-{1}-{0:05d}.fits".format(cnt, fltname)
-            newfits = os.path.join(sciencepath, newfname)
-            # Write to temporary file so that we can run solve-field to
-            # set WCS data
             hduList[0].data = hduList[0].data.astype(img_dtype)
-            if solve:
-                hduList.writeto(os.path.join(tmppath, "tmp.fits"), overwrite=True)
-                # Now run solve-field to generate final file
-                rslt = runsolving(hduList[0].header['FOVRA'], hduList[0].header['FOVDEC'],
-                    os.path.join(tmppath, "tmp.fits"), newfits )
-            else:
-                hduList.writeto(newfits, overwrite=True)
-                cnt = cnt + 1
-            if rslt == False:
-                print("Error solving %s - skipping" % f)
-                hduList.writeto(os.path.join(badsciencepath, f), overwrite=True)
-            elif targetRA:
-                solvedcnt = solvedcnt + 1
-                with fits.open(newfits) as hduListNew:
-                    w = WCS(hduListNew[0].header)
-                    shape = hduList[0].data.shape
-                    try:
-                        noconv = False
-                        x, y = w.world_to_pixel(target)
-                        if c1 is None:
-                            x1 = x
-                            y1 = y
-                        else:
-                            x1, y1 = w.world_to_pixel(c1)
-                    except NoConvergence as e:
-                        noconv = True
-                    # If out of range, drop the frame
-                    if noconv:
-                        rslt = False;
-                        logger.warning("Rejecting - no convergence on frame %s" % (f))
-                        shutil.move(newfits, os.path.join(badsciencepath, f))                    
-                    elif (x < borderbuffer) or (x >= (shape[0]-borderbuffer)) or (y < borderbuffer) or (y >= (shape[1]-borderbuffer)):
-                        rslt = False;
-                        logger.warning("Rejecting - target out of frame %s (%f, %f)" % (f, x, y))
-                        shutil.move(newfits, os.path.join(badsciencepath, f))
-                    elif (x1 < borderbuffer) or (x1 >= (shape[0]-borderbuffer)) or (y1 < borderbuffer) or (y1 >= (shape[1]-borderbuffer)):
-                        rslt = False;
-                        logger.warning("Rejecting - comparison 1 out of frame %s (%f, %f)" % (f, x1, y1))
-                        shutil.move(newfits, os.path.join(badsciencepath, f))
+            hduList.writeto(newfits, overwrite=True)
+            cnt = cnt + 1
+        # if solved and we have target ra/dec, check it in field
+        if solve and targetRA:
+            solvedcnt = solvedcnt + 1
+            with fits.open(newfits) as hduList:
+                w = WCS(hduList[0].header)
+                shape = hduList[0].data.shape
+                try:
+                    noconv = False
+                    x, y = w.world_to_pixel(target)
+                    if c1 is None:
+                        x1 = x
+                        y1 = y
                     else:
-                        if printfirst:
-                            logger.info("Pixel coordinate of target: %f, %f" % (x, y))
-                            if c1 is not None:
-                                logger.info("Pixel coordinate of comparison 1: %f, %f" % (x1, y1))
-                            printfirst = False
-                        cnt = cnt + 1
-            # If good result AND we are doing toall, generate different versions
-            if rslt and toall:                
-                with fits.open(newfits) as hduList:
-                    hduList[0].header.remove('BAYERPAT')
-                    hduList[0].header.remove('XBAYROFF')
-                    hduList[0].header.remove('YBAYROFF')
-                    new_image_data = demosaicing_CFA_Bayer_bilinear(hduList[0].data, "RGGB")
-                    # Make red
-                    red_image_data = new_image_data @ np.array([ 1, 0, 0 ])
-                    hduList[0].data = red_image_data.astype(img_dtype)
-                    newfname = "science-{1}-{0:05d}.fits".format(cnt, "CR")
-                    newfits = os.path.join(redpath, newfname)
-                    hduList.writeto(newfits, overwrite=True)
-                    # Make green
-                    green_image_data = new_image_data @ np.array([ 0, 1, 0 ])
-                    hduList[0].data = green_image_data.astype(img_dtype)
-                    newfname = "science-{1}-{0:05d}.fits".format(cnt, "CG")
-                    newfits = os.path.join(greenpath, newfname)
-                    hduList.writeto(newfits, overwrite=True)
-                    # Make blue
-                    blue_image_data = new_image_data @ np.array([ 0, 0, 1 ])
-                    hduList[0].data = blue_image_data.astype(img_dtype)
-                    newfname = "science-{1}-{0:05d}.fits".format(cnt, "CB")
-                    newfits = os.path.join(bluepath, newfname)
-                    hduList.writeto(newfits, overwrite=True)
-                    # Make gray
-                    gray_image_data = new_image_data @ np.array([ 0.2125, 0.7154, 0.0721 ])
-                    hduList[0].data = gray_image_data.astype(img_dtype)
-                    newfname = "science-{1}-{0:05d}.fits".format(cnt, "CV")
-                    newfits = os.path.join(graypath, newfname)
-                    hduList.writeto(newfits, overwrite=True)
+                        x1, y1 = w.world_to_pixel(c1)
+                except NoConvergence as e:
+                    noconv = True
+                # If out of range, drop the frame
+                if noconv:
+                    rslt = False;
+                    logger.warning("Rejecting - no convergence on frame %s" % (f))
+                    shutil.move(newfits, os.path.join(badsciencepath, f))                    
+                elif (x < borderbuffer) or (x >= (shape[0]-borderbuffer)) or (y < borderbuffer) or (y >= (shape[1]-borderbuffer)):
+                    rslt = False;
+                    logger.warning("Rejecting - target out of frame %s (%f, %f)" % (f, x, y))
+                    shutil.move(newfits, os.path.join(badsciencepath, f))
+                elif (x1 < borderbuffer) or (x1 >= (shape[0]-borderbuffer)) or (y1 < borderbuffer) or (y1 >= (shape[1]-borderbuffer)):
+                    rslt = False;
+                    logger.warning("Rejecting - comparison 1 out of frame %s (%f, %f)" % (f, x1, y1))
+                    shutil.move(newfits, os.path.join(badsciencepath, f))
+                else:
+                    if printfirst:
+                        logger.info("Pixel coordinate of target: %f, %f" % (x, y))
+                        if c1 is not None:
+                            logger.info("Pixel coordinate of comparison 1: %f, %f" % (x1, y1))
+                        printfirst = False
+        # If good result AND we are doing toall, generate different versions
+        if rslt and toall:                
+            with fits.open(newfits) as hduList:
+                hduList[0].header.remove('BAYERPAT')
+                hduList[0].header.remove('XBAYROFF')
+                hduList[0].header.remove('YBAYROFF')
+                new_image_data = demosaicing_CFA_Bayer_bilinear(hduList[0].data, "RGGB")
+                # Make red
+                red_image_data = new_image_data @ np.array([ 1, 0, 0 ])
+                hduList[0].data = red_image_data.astype(img_dtype)
+                newfname = "science-{1}-{0:05d}.fits".format(cnt, "CR")
+                newfits = os.path.join(redpath, newfname)
+                hduList.writeto(newfits, overwrite=True)
+                # Make green
+                green_image_data = new_image_data @ np.array([ 0, 1, 0 ])
+                hduList[0].data = green_image_data.astype(img_dtype)
+                newfname = "science-{1}-{0:05d}.fits".format(cnt, "CG")
+                newfits = os.path.join(greenpath, newfname)
+                hduList.writeto(newfits, overwrite=True)
+                # Make blue
+                blue_image_data = new_image_data @ np.array([ 0, 0, 1 ])
+                hduList[0].data = blue_image_data.astype(img_dtype)
+                newfname = "science-{1}-{0:05d}.fits".format(cnt, "CB")
+                newfits = os.path.join(bluepath, newfname)
+                hduList.writeto(newfits, overwrite=True)
+                # Make gray
+                gray_image_data = new_image_data @ np.array([ 0.2125, 0.7154, 0.0721 ])
+                hduList[0].data = gray_image_data.astype(img_dtype)
+                newfname = "science-{1}-{0:05d}.fits".format(cnt, "CV")
+                newfits = os.path.join(graypath, newfname)
+                hduList.writeto(newfits, overwrite=True)
+        if rslt:
+            cnt = cnt + 1
     except OSError as e:
         logger.error("Error: file %s - %s (%s)" % (f, e.__class__, e))     
 
