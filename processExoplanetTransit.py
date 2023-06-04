@@ -38,11 +38,15 @@ def runsolving(ra, dec, infile, outfile):
             "--ra", str(ra),
             "--dec", str(dec),
             "--radius", "5",
-            "--fits-image", "--guess-scale",
+            # All Unistellar scopes are between 1 and 2 arcsec per pixel
+            "--scale-low", "1",
+            "--scale-high", "2",
+             "--scale-units", "arcsecperpix",
+            "--fits-image",
             "--new-fits", outfile ]
         #logger.info(f"args={args}")
         rslt = subprocess.run(args, 
-            timeout=60, capture_output=True)
+            timeout=10, capture_output=True)
         if rslt.returncode != 0 or (not isfile(outfile)):
             logger.error("Error solving %s - skipping" % f)
             return False
@@ -332,7 +336,6 @@ if len(flatfiles) > 0:
     #logger.info(f"normflataccum={normflataccum}")
     
 cnt = 0
-solvedcnt = 0
 timeaccumlist = []
 timeaccumstart = 0
 timeaccumra = 0
@@ -356,6 +359,13 @@ for f in lightfiles:
                 obsLongitude = hduList[0].header['LONGITUD']
             if cnt == 0:
                 logger.info("Observatory: Lat={0} deg, Lon={1} deg, Alt={2} meters".format(obsLatitude, obsLongitude, obsAltitude))
+            img_dtype = hduList[0].data.dtype
+            # First, calibrate image
+            if len(dark) > 0:
+                # Clamp the data with the dark from below, so we can subtract without rollover
+                np.maximum(hduList[0].data, dark[0].data, out=hduList[0].data)
+                # And subtract the dark
+                np.subtract(hduList[0].data, dark[0].data, out=hduList[0].data)
             if solve:
                 hduList.writeto(os.path.join(tmppath, "tmp.fits"), overwrite=True)
             else:
@@ -371,18 +381,10 @@ for f in lightfiles:
             continue
         with fits.open(newfits) as hduList:
             # Remember base type
-            #img_dtype = hduList[0].data.dtype
-            img_dtype = np.float32
-            # First, calibrate image
-            if len(dark) > 0:
-                # Clamp the data with the dark from below, so we can subtract without rollover
-                np.maximum(hduList[0].data, dark[0].data, out=hduList[0].data)
-                # And subtract the dark
-                np.subtract(hduList[0].data, dark[0].data, out=hduList[0].data)
+            img_dtype = hduList[0].data.dtype
             # If we have flat, apply it
             if len(flat) > 0:
                 hduList[0].data = hduList[0].data.astype(np.float32) / normflataccum
-
             # Now debayer into grayscale                
             if not tobayer:
                 # Demosaic the image
@@ -421,10 +423,8 @@ for f in lightfiles:
 
             hduList[0].data = hduList[0].data.astype(img_dtype)
             hduList.writeto(newfits, overwrite=True)
-            cnt = cnt + 1
         # if solved and we have target ra/dec, check it in field
         if solve and targetRA:
-            solvedcnt = solvedcnt + 1
             with fits.open(newfits) as hduList:
                 w = WCS(hduList[0].header)
                 shape = hduList[0].data.shape
@@ -493,5 +493,5 @@ for f in lightfiles:
     except OSError as e:
         logger.error("Error: file %s - %s (%s)" % (f, e.__class__, e))     
 
-logger.info("Processed %d out of %d files into destination '%s'" % (solvedcnt, cnt, outputdir))
+logger.info("Processed %d out of %d files into destination '%s'" % (cnt, len(lightfiles), outputdir))
 
