@@ -33,13 +33,15 @@ logger.addHandler(ch)
 
 def runsolving(ra, dec, infile, outfile):
     try:
-        rslt = subprocess.run(["solve-field", infile,
+        args = ["solve-field", infile,
             "--no-plots", "--overwrite",
             "--ra", str(ra),
             "--dec", str(dec),
             "--radius", "5",
             "--fits-image", "--guess-scale",
-            "--new-fits", outfile ], 
+            "--new-fits", outfile ]
+        #logger.info(f"args={args}")
+        rslt = subprocess.run(args, 
             timeout=60, capture_output=True)
         if rslt.returncode != 0:
             logger.error("Error solving %s - skipping" % f)
@@ -166,19 +168,7 @@ coloridx = 0
 fltname='bayer'
 solve = True
 
-if args.all:
-    toall = True
-    fltname='BAYER'  # Initial file is bayer
-    print("Produce red, green, blue, gray channel FITS files")
-    redpath = os.path.join(sciencepath, "red")
-    greenpath = os.path.join(sciencepath, "green")
-    bluepath = os.path.join(sciencepath, "blue")
-    graypath = os.path.join(sciencepath, "gray")
-    pathlib.Path(redpath).mkdir(parents=True, exist_ok=True)
-    pathlib.Path(greenpath).mkdir(parents=True, exist_ok=True)
-    pathlib.Path(bluepath).mkdir(parents=True, exist_ok=True)
-    pathlib.Path(graypath).mkdir(parents=True, exist_ok=True)
-elif args.red:
+if args.red:
     # Red
     colorweight = np.array([ 1, 0, 0 ])
     fltname='CR'
@@ -203,8 +193,20 @@ elif args.gray:
     print("Produce grayscale FITS files")
 else:
     tobayer = True
-    logger.info("Produce Bayer FITS files")
     fltname='BAYER'
+    if args.all:
+        toall = True
+        print("Produce red, green, blue, gray channel FITS files")
+        redpath = os.path.join(sciencepath, "red")
+        greenpath = os.path.join(sciencepath, "green")
+        bluepath = os.path.join(sciencepath, "blue")
+        graypath = os.path.join(sciencepath, "gray")
+        pathlib.Path(redpath).mkdir(parents=True, exist_ok=True)
+        pathlib.Path(greenpath).mkdir(parents=True, exist_ok=True)
+        pathlib.Path(bluepath).mkdir(parents=True, exist_ok=True)
+        pathlib.Path(graypath).mkdir(parents=True, exist_ok=True)
+    else:
+        logger.info("Produce Bayer FITS files")
 
 if args.nosolve:
     solve = False
@@ -351,24 +353,22 @@ for f in lightfiles:
                 obsLongitude = hduList[0].header['LONGITUD']
             if cnt == 0:
                 logger.info("Observatory: Lat={0} deg, Lon={1} deg, Alt={2} meters".format(obsLatitude, obsLongitude, obsAltitude))
+            # Remember base type
+            img_dtype = hduList[0].data.dtype
             # First, calibrate image
             if len(dark) > 0:
                 # Clamp the data with the dark from below, so we can subtract without rollover
                 np.maximum(hduList[0].data, dark[0].data, out=hduList[0].data)
                 # And subtract the dark
                 np.subtract(hduList[0].data, dark[0].data, out=hduList[0].data)
-            # Remember base type
-            img_dtype = hduList[0].data.dtype
             # If we have flat, apply it
             if len(flat) > 0:
-                normalized = hduList[0].data.astype(np.float32) / normflataccum
-                hduList[0].data = normalized.astype(img_dtype)
+                hduList[0].data = hduList[0].data.astype(np.float32) / normflataccum
             # Now debayer into grayscale                
-            if not tobayer and not toall:
+            if not tobayer:
                 # Demosaic the image
                 new_image_data = demosaicing_CFA_Bayer_bilinear(hduList[0].data, "RGGB")
-                new_image_data = new_image_data @ colorweight
-                hduList[0].data = new_image_data.astype(img_dtype)
+                hduList[0].data = new_image_data @ colorweight
             # Compute BJD times
             if targetRA:
                 mjdtimes = np.array([hduList[0].header['MJD-MID']])
@@ -405,6 +405,7 @@ for f in lightfiles:
             newfits = os.path.join(sciencepath, newfname)
             # Write to temporary file so that we can run solve-field to
             # set WCS data
+            hduList[0].data = hduList[0].data.astype(img_dtype)
             if solve:
                 hduList.writeto(os.path.join(tmppath, "tmp.fits"), overwrite=True)
                 # Now run solve-field to generate final file
@@ -452,8 +453,11 @@ for f in lightfiles:
                             printfirst = False
                         cnt = cnt + 1
             # If good result AND we are doing toall, generate different versions
-            if rslt and toall:
+            if rslt and toall:                
                 with fits.open(newfits) as hduList:
+                    hduList[0].header.remove('BAYERPAT')
+                    hduList[0].header.remove('XBAYROFF')
+                    hduList[0].header.remove('YBAYROFF')
                     new_image_data = demosaicing_CFA_Bayer_bilinear(hduList[0].data, "RGGB")
                     # Make red
                     red_image_data = new_image_data @ np.array([ 1, 0, 0 ])
