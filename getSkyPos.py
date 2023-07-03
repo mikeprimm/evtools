@@ -1,23 +1,15 @@
 import argparse
 from genericpath import isfile
 import os
-import pathlib
-import shutil
 import logging
-from tkinter import E
-from astropy.io import fits
-from astropy.wcs import WCS, FITSFixedWarning
+from astropy.wcs import FITSFixedWarning
 from astropy.coordinates import SkyCoord, EarthLocation, AltAz
 from astropy.time import Time
-from astropy.wcs.wcs import NoConvergence
 import astropy.units as u
-import numpy as np
-import subprocess
 import warnings
 from colour_demosaicing import demosaicing_CFA_Bayer_bilinear
 
 # UTC to BJD converter import
-from barycorrpy import utc_tdb
 from pandas import isna
 
 warnings.simplefilter('ignore', category=FITSFixedWarning)

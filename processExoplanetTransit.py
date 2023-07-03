@@ -16,6 +16,12 @@ import subprocess
 import warnings
 from colour_demosaicing import demosaicing_CFA_Bayer_bilinear
 
+from libs.stacks import buildMasterFlatStack
+try:
+    from .libs.stacks import buildMedianStack
+except ImportError:  # package import
+    from libs.stacks import buildMedianStack
+
 # UTC to BJD converter import
 from barycorrpy import utc_tdb
 from pandas import isna
@@ -257,83 +263,18 @@ if flatsrcdir:
 dark = fits.HDUList()
 if len(darkfiles) > 0:
     logger.info(f"Processing {len(darkfiles)} darks")
-    for f in darkfiles:
-        try:
-            dfile = os.path.join(darksrcdir, f)
-            # Load file into list of HDU list 
-            with fits.open(dfile) as hduList:
-                # Use first one as base
-                if len(dark) == 0:
-                    darkaccum = np.zeros((0,) + hduList[0].data.shape)
-                    dark.append(hduList[0].copy())
-                darkaccum = np.append(darkaccum, [ hduList[0].data ], axis=0)
-                hduList.writeto(os.path.join(darkpath, f), overwrite=True)
-        except OSError:
-            logging.error("Error: file %s" % f)        
-    # Now compute median for each pixel
-    darkaccum = np.median(darkaccum, axis=0)
-    dark[0].data = darkaccum.astype(np.uint16)
-    # And write output dark
-    dark.writeto(os.path.join(darkpath, "master-dark.fits"), overwrite=True)
-
+    dark = buildMedianStack(darksrcdir, darkfiles, "master-dark.fits")
 # Build dark flat frame, if we have any to work with
 darkflat = fits.HDUList()
 if len(darkflatfiles) > 0:
     logger.info(f"Processing {len(darkflatfiles)} dark-flats")
-    for f in darkflatfiles:
-        try:
-            dfile = os.path.join(darkflatsrcdir, f)
-            # Load file into list of HDU list 
-            with fits.open(dfile) as hduList:
-                # Use first one as base
-                if len(darkflat) == 0:
-                    darkflataccum = np.zeros((0,) + hduList[0].data.shape)
-                    darkflat.append(hduList[0].copy())
-                darkflataccum = np.append(darkflataccum, [ hduList[0].data ], axis=0)
-                hduList.writeto(os.path.join(darkflatpath, f), overwrite=True)
-        except OSError:
-            logging.error("Error: file %s" % f)        
-    # Now compute median for each pixel
-    darkflataccum = np.median(darkflataccum, axis=0)
-    darkflat[0].data = darkflataccum.astype(np.uint16)
-    # And write output dark flat
-    darkflat.writeto(os.path.join(darkflatpath, "master-darkflat.fits"), overwrite=True)
+    darkflat = buildMedianStack(darkflatsrcdir, darkflatfiles, "master-darkflat.fits")
 
 # Build flat frame, if we have any to work with
 flat = fits.HDUList()
 if len(flatfiles) > 0:
     logger.info(f"Processing {len(flatfiles)} flats")
-    for f in flatfiles:
-        try:
-            dfile = os.path.join(flatsrcdir, f)
-            # Load file into list of HDU list 
-            with fits.open(dfile) as hduList:
-                # Use first one as base
-                if len(flat) == 0:
-                    flataccum = np.zeros((0,) + hduList[0].data.shape)
-                    flat.append(hduList[0].copy())
-                flataccum = np.append(flataccum, [ hduList[0].data ], axis=0)
-                hduList.writeto(os.path.join(flatpath, f), overwrite=True)
-        except OSError:
-            logging.error("Error: file %s" % f)        
-    # Now compute median for each pixel
-    flataccum = np.median(flataccum, axis=0)
-    # If we have dark flat, subtract it
-    if len(darkflat) > 0:
-        # Clamp the data with the dark from below, so we can subtract without rollover
-        np.maximum(flataccum, darkflat[0].data, out=flataccum)
-        # And subtract the dark
-        np.subtract(flataccum, darkflat[0].data, out=flataccum)
-    # And write output dark flat
-    flat[0].data = flataccum.astype(np.uint16)
-    flat.writeto(os.path.join(flatpath, "master-flat.fits"), overwrite=True)
-    # And normalize the flat
-    flataccum = flataccum.astype(np.float32)
-    medi = np.median(flataccum)
-    normflataccum = flataccum / medi
-    # Handle any zero pixels (avoid divide by zero)
-    normflataccum[normflataccum == 0] = 1
-    #logger.info(f"normflataccum={normflataccum}")
+    normflataccum = buildMasterFlatStack(flatsrcdir, flatfiles, "master-flat.fits", darkflat)
     
 cnt = 0
 timeaccumlist = []
