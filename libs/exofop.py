@@ -1,5 +1,8 @@
 import argparse
 from genericpath import isfile
+from astropy import units as u
+from astropy.coordinates import SkyCoord
+from astropy.time import Time
 import os
 import logging
 from datetime import datetime, timezone
@@ -49,18 +52,14 @@ def exofop_getcompositeinfo(tic):
             elif line.startswith("V     "):
                 sline = line[6:].strip().split(" ")
                 vmag = float(sline[0])
-        return ra2015, dec2015, pra, pdec, vmag
+        skycoord = SkyCoord(ra=ra2015*u.deg, 
+                          dec=dec2015*u.deg,
+                          distance=1*u.mpc, # Far enough to ignore parallax
+                          pm_ra_cosdec=pra*u.mas/u.yr,
+                          pm_dec=pdec*u.mas/u.yr,
+                          obstime=Time('J2015.5'))                
+        return skycoord, vmag
     except Exception as e:
         logging.error(f"EXOFOP error: {e}")
-        return None, None, None, None, None
+        return None, None
 
-def currentRADec(ra, dec, pra, pdec):
-    # Compute position given current time vs J2015.5
-    now = datetime.now(timezone.utc)
-    j2015_5 = datetime(2015,7,1,0,0,0,0, timezone.utc)
-    elapsed_yrs = (now - j2015_5).total_seconds() / 31557600
-    # Adjust for proper motion (milliarcsec to degrees)
-    curRA = ra + (elapsed_yrs * pra / 3600000.0)
-    curDec = dec + (elapsed_yrs * pdec / 3600000.0)
-
-    return curRA, curDec

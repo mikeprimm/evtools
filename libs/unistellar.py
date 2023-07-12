@@ -1,8 +1,10 @@
 from math import log10, floor
+from astropy.time import Time
+from datetime import datetime
 try:
-    from .exofop import exofop_getcompositeinfo, exofop_getticid, currentRADec
+    from .exofop import exofop_getcompositeinfo, exofop_getticid
 except ImportError: 
-    from libs.exofop import exofop_getcompositeinfo, exofop_getticid, currentRADec
+    from libs.exofop import exofop_getcompositeinfo, exofop_getticid
 
 # Constants from unistellar spreadsheet
 baselineExp = 3200.0
@@ -32,11 +34,11 @@ def unstellarExoplanetURL(target):
     tic = exofop_getticid(target)
     if tic is None:
         return None
-    ra, dec, pra, pdec, vmag = exofop_getcompositeinfo(tic)
-    if ra is None:
+    skypos, vmag = exofop_getcompositeinfo(tic)
+    if skypos.ra is None:
         return None
-    curRA, curDec = currentRADec(ra, dec, pra, pdec)
+    curpos = skypos.apply_space_motion(new_obstime=Time(datetime.utcnow(), scale='utc'))
     bestgain, exptime = unistellarBestGainAndExp(vmag)
     if bestgain is None:
         return None
-    return f"unistellar://science/transit?ra={curRA:.5f}&dec={curDec:.5f}&c=3970&et={exptime}&g={bestgain}&d=3600"
+    return f"unistellar://science/transit?ra={curpos.ra.deg:.5f}&dec={curpos.dec.deg:.5f}&c=3970&et={exptime}&g={bestgain}&d=3600"

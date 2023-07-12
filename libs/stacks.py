@@ -66,3 +66,61 @@ def buildMasterFlatStack(filedir: str, files: list, outfile: str, darkflat: fits
         normflataccum[normflataccum == 0] = 1
         #logger.info(f"normflataccum={normflataccum}")
     return normflataccum
+
+# Scale single color channel up 4x4 for stacking
+#   Each pixel is treated as a 4x4 grid centered
+#   For red/blue (one pixel ever other row and column), the corresponding quarters of the intermediate
+#   pixels are assumed to match the pixel:
+#
+#        ---              ------------
+#        -R-    becomes   ------------
+#        ---              --RRRRRRRR--
+#                         --RRRRRRRR--
+#                         --RRRRRRRR--
+#                         --RRRRRRRR--
+#                         --RRRRRRRR--
+#                         --RRRRRRRR--
+#                         --RRRRRRRR--
+#                         --RRRRRRRR--
+#                         ------------
+#                         ------------
+#
+#   For green (2 pixels out of each 2x2), the nearest 25% of the intermediate pixels are assumed
+#   to match (diamond pattern):
+#
+#        ---              ------------
+#        -G-    becomes   ------------
+#        ---              -----G------
+#                         ----GGG-----
+#                         ----GGGGG---
+#                         ---GGGGGGG--
+#                         --GGGGGGG---
+#                         ---GGGGG----
+#                         -----GGG----
+#                         ------G-----
+#                         ------------
+#                         ------------
+#
+def scaleAndDemosaicImage(data: np.array):
+    print(f"data.shape={data.shape}")
+    newshape = (data.shape[0]*4, data.shape[1]*4)
+    clrshape = (data.shape[0]>>1, data.shape[1]>>1)
+    reddata = np.zeros(clrshape, dtype=data.dtype)
+    green1data = np.zeros(clrshape, dtype=data.dtype)
+    green2data = np.zeros(clrshape, dtype=data.dtype)
+    bluedata = np.zeros(clrshape, dtype=data.dtype)
+    redxmap = np.minimum((np.arange(newshape[0]) + 2) >> 3, clrshape[0]-1)
+    redymap = np.minimum((np.arange(newshape[1]) + 2) >> 3, clrshape[1]-1)
+    reddata[:,:] = data[::2,::2]       
+    green1data[:,:] = data[::2,1::2]
+    green2data[:,:] = data[1::2,::2]
+    bluedata[:,:] = data[1::2,1::2]
+    red = np.zeros(newshape, dtype=data.dtype)
+    green = np.zeros(newshape, dtype=data.dtype)
+    blue = np.zeros(newshape, dtype=data.dtype)
+    for x in range(len(redxmap)):
+        red[x,:] = reddata[redxmap[x],redymap]
+        blue[x,:] = bluedata[redxmap[x],redymap]
+    print(f"red={red}")
+    print(f"blue={blue}")
+    return red, green, blue
