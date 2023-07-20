@@ -225,6 +225,7 @@ darkfiles = []
 for path in os.listdir(darksrcdir):
     dfile = os.path.join(darksrcdir, path)
     if (path.startswith('.')): continue
+    if (path.startswith('master-dark.fits')): continue
     # check if current path is a file
     if os.path.isfile(dfile):
         darkfiles.append(path)
@@ -244,6 +245,7 @@ if darkflatsrcdir:
     for path in os.listdir(darkflatsrcdir):
         dfile = os.path.join(darkflatsrcdir, path)
         if (path.startswith('.')): continue
+        if (path.startswith('master-darkflat.fits')): continue
         # check if current path is a file
         if os.path.isfile(dfile):
             darkflatfiles.append(path)
@@ -254,6 +256,7 @@ if flatsrcdir:
     for path in os.listdir(flatsrcdir):
         dfile = os.path.join(flatsrcdir, path)
         if (path.startswith('.')): continue
+        if (path.startswith('master-flat.fits')): continue
         # check if current path is a file
         if os.path.isfile(dfile):
             flatfiles.append(path)
