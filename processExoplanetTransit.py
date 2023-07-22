@@ -16,11 +16,14 @@ import subprocess
 import warnings
 from colour_demosaicing import demosaicing_CFA_Bayer_bilinear
 
-from libs.stacks import buildMasterFlatStack
 try:
-    from .libs.stacks import buildMedianStack
+    from .libs.stacks import buildMedianStack, buildMasterFlatStack
 except ImportError:  # package import
-    from libs.stacks import buildMedianStack
+    from libs.stacks import buildMedianStack, buildMasterFlatStack
+try:
+    from .libs.exofop import exofop_getcompositeinfo, exofop_getticid
+except ImportError: 
+    from libs.exofop import exofop_getcompositeinfo, exofop_getticid
 
 # UTC to BJD converter import
 from barycorrpy import utc_tdb
@@ -85,6 +88,7 @@ parser.add_argument("-G", "--gray", action='store_true')
 parser.add_argument("-B", "--blueblock", action='store_true')
 parser.add_argument('-A', "--all", action='store_true')
 parser.add_argument("-N", "--nosolve", action='store_true')
+parser.add_argument("--target", help = "Target Name (EXOFOP)")
 parser.add_argument("--ra", help = "Target RA")
 parser.add_argument("--dec", help = "Target Dec")
 parser.add_argument("--c1ra", help = "Comparison 1 RA")
@@ -137,14 +141,23 @@ if args.obsalt:
     obsAltitude = float(args.obsalt)
 
 # Get target
-if args.dec:
+target = None
+targetRA = None
+targetDec = None
+if args.target:
+    tic = exofop_getticid(args.target)
+    if tic:
+        target, vmag = exofop_getcompositeinfo(tic)
+        targetRA = target.ra.deg
+        targetDec = target.dec.deg
+        logger.info("Target coords (J2000): RA=%d:%d:%f, Dec=%s%d:%d:%f" % (target.ra.hms.h, target.ra.hms.m, target.ra.hms.s, '+' if       target.dec.signed_dms.sign >= 0 else '-', target.dec.signed_dms.d, target.dec.signed_dms.m, target.dec.signed_dms.s))
+    else:
+        logger.warn("Target not found at EXOFOP: %s" % args.targetcoords)
+elif args.dec:
     target = SkyCoord(args.ra, args.dec, frame='icrs', unit=(u.hourangle, u.deg))
     targetRA = target.ra.deg
     targetDec = target.dec.deg
     logger.info("Target coords: RA=%d:%d:%f, Dec=%s%d:%d:%f" % (target.ra.hms.h, target.ra.hms.m, target.ra.hms.s, '+' if       target.dec.signed_dms.sign >= 0 else '-', target.dec.signed_dms.d, target.dec.signed_dms.m, target.dec.signed_dms.s))
-else:
-    targetRA = None
-    targetDec = None
 
 c1 = None
 if args.c1ra:
@@ -303,6 +316,11 @@ for f in lightfiles:
                 obsLongitude = hduList[0].header['LONGITUD']
             if cnt == 0:
                 logger.info("Observatory: Lat={0} deg, Lon={1} deg, Alt={2} meters".format(obsLatitude, obsLongitude, obsAltitude))
+                if target:
+                    targetNow = target.apply_space_motion(new_obstime = Time(hduList[0].header['MJD-MID'], format='mjd'))
+                    logger.info("Target coords (obs date): RA=%d:%d:%f, Dec=%s%d:%d:%f" % (targetNow.ra.hms.h, targetNow.ra.hms.m, targetNow.ra.hms.s, '+' if targetNow.dec.signed_dms.sign >= 0 else '-', targetNow.dec.signed_dms.d, targetNow.dec.signed_dms.m, targetNow.dec.signed_dms.s))
+                    targetRA = targetNow.ra.deg
+                    targetDec = targetNow.dec.deg
             img_dtype = hduList[0].data.dtype
             # First, calibrate image
             if len(dark) > 0:
