@@ -43,6 +43,7 @@ logger.addHandler(ch)
 def runsolving(ra, dec, infile, outfile):
     try:
         args = ["solve-field", infile,
+            "--no-remove-lines", "--uniformize", "0",
             "--no-plots", "--overwrite",
             "--ra", str(ra),
             "--dec", str(dec),
@@ -58,6 +59,8 @@ def runsolving(ra, dec, infile, outfile):
             timeout=10, capture_output=True)
         if rslt.returncode != 0 or (not isfile(outfile)):
             logger.error("Error solving %s - skipping" % f)
+            #logger.error(rslt.stdout)
+            #logger.error(rslt.stderr)
             return False
         return True
     except subprocess.TimeoutExpired:
