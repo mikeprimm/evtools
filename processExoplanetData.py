@@ -3,6 +3,7 @@ from genericpath import isfile
 import os
 import pathlib
 import logging
+import time
 from astropy.io import fits
 from astropy.wcs import FITSFixedWarning
 from astropy.time import Time
@@ -25,6 +26,22 @@ from barycorrpy import utc_tdb
 from pandas import isna
 
 warnings.simplefilter('ignore', category=FITSFixedWarning)
+
+
+def scaleUp(ary: np.array, scale: int):
+   if scale == 1:
+       return np.copy(ary)
+   return ary.repeat(scale, axis=0).repeat(scale, axis=1)
+
+def scaleDown(ary: np.array, scale: int, dtype: np.dtype):
+    if scale == 1:
+       return ary.astype(dtype)
+    rslt = np.zeros([ ary.shape[0] // scale, ary.shape[1] // scale ], dtype=dtype)
+    for x in range(scale):
+        for y in range(scale):
+            rslt += ary[x::scale,y::scale]
+    rslt /= (scale * scale)
+    return rslt
 
 # create logger
 logger = logging.getLogger('processExoplanetData')
@@ -51,6 +68,7 @@ parser.add_argument('-b', "--blue", action='store_true')
 parser.add_argument("-G", "--gray", action='store_true')
 parser.add_argument('-B', "--bin", action='store_true')
 parser.add_argument("--stacktime", help = "Number of seconds to stack (default 120)") 
+parser.add_argument('-ss', "--supersample", help = "Supersample scale")
 # Read arguments from command line
 try:
     args = parser.parse_args()
@@ -80,7 +98,6 @@ if args.darkflats:
 flatsrcdir=None
 if args.flats:
     flatsrcdir = args.flats
-
 # Make output directory, if needed
 pathlib.Path(outputdir).mkdir(parents=True, exist_ok=True)
 if args.darkflats:
@@ -92,6 +109,9 @@ if args.flats:
 stacktime = 120
 if args.stacktime:
     stacktime = int(args.stacktime)
+supersample = 2
+if args.supersample:
+    supersample = int(args.supersample) 
 
 doRed = False
 doGreen = False
@@ -192,9 +212,7 @@ for idx in range(lastidx + 1):
         lfile = os.path.join(sciencesrcdir, f)
         # Load file into list of HDU list 
         with fits.open(lfile) as hduList:
-            data = hduList[0].data
-            # Remember base type
-            img_dtype = data.dtype
+            data = hduList[0].data.astype(np.float64)
             # First, calibrate image
             if len(dark) > 0:
                 # Clamp the data with the dark from below, so we can subtract without rollover
@@ -203,7 +221,7 @@ for idx in range(lastidx + 1):
                 np.subtract(data, dark[0].data, out=data)
             # If we have flat, apply it
             if len(flat) > 0:
-                data = data.astype(np.float32) / normflataccum
+                data /= normflataccum
             # Process color channel
             # If making red, split out red channel
             if doBin:
@@ -211,34 +229,27 @@ for idx in range(lastidx + 1):
                 hduList[0].header.set('FOVYREF', hduList[0].header['FOVYREF'] // 2)
                 if doRed:
                     data = data[::2,::2]
-                    data = data.astype(img_dtype)
                 # If making green, split out green channels
                 elif doGreen:
                     data = (data[1::2,::2] + data[::2,1::2]) / 2
-                    data = data.astype(img_dtype)
                 # If making blue, split out blue channels
                 elif doBlue:
                     data = data[1::2,1::2]
-                    data = data.astype(img_dtype)
                 else:
                     print("gray not supported with binning")                    
             else:
                 data = demosaicing_CFA_Bayer_bilinear(data, "RGGB")
                 if doRed:
                     data = data @ np.array([ 1, 0, 0 ])
-                    data = data.astype(img_dtype)
                 # If making green, split out green channels
                 elif doGreen:
                     data = data @ np.array([ 0, 1, 0 ])
-                    data = data.astype(img_dtype)
                 # If making blue, split out blue channels
                 elif doBlue:
                     data = data @ np.array([ 0, 0, 1 ])
-                    data = data.astype(img_dtype)
                 # If making grayscale
                 elif doGray:
                     data = data @ np.array([ 0.2125, 0.7154, 0.0721 ]);
-                    data = data.astype(img_dtype)
             # And stack image
             mjdstart = hduList[0].header['MJD-OBS']
             if timeaccumcnt == 0:
@@ -246,9 +257,9 @@ for idx in range(lastidx + 1):
                 datestart = hduList[0].header['DATE-OBS']
                 dateend = hduList[0].header['DATE-END']
                 timeaccumstart = mjdstart * 24 * 60 * 60
-                firstframe = data
-                accumulatorframe = data.astype(np.float64)
-                accumulatorcounts = np.ones(accumulatorframe.shape)
+                firstframe = scaleUp(data, supersample)
+                accumulatorframe = np.copy(firstframe)
+                accumulatorcounts = np.ones(accumulatorframe.shape, dtype=np.int32)
                 mjdend = hduList[0].header['MJD-END']
                 timeaccumcnt += 1
             else:
@@ -279,8 +290,8 @@ for idx in range(lastidx + 1):
                 mtime = Time((stime.jd + etime.jd) / 2, format="jd", scale="tt")
                 mtime.format = "isot"
                 hduList[0].header.set("DATE-AVG", mtime.to_string())
-                hduList[0].data = accumulatorframe / accumulatorcounts
-                hduList[0].data = hduList[0].data.astype(np.float32)
+                accumulatorframe /= accumulatorcounts
+                hduList[0].data = scaleDown(accumulatorframe, supersample, np.float32)
                 hduList.writeto(os.path.join(outputdir, f"stack-{stackedcnt}.fits"), overwrite=True)
                 stackedcnt = stackedcnt + 1
                 # Reset accumulator
