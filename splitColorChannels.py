@@ -51,6 +51,7 @@ parser.add_argument('-r', "--red", action='store_true')
 parser.add_argument('-g', "--green", action='store_true')
 parser.add_argument('-b', "--blue", action='store_true')
 parser.add_argument('-A', "--all", action='store_true')
+parser.add_argument('-B', "--bin", action='store_true')
 # Read arguments from command line
 try:
     args = parser.parse_args()
@@ -78,6 +79,7 @@ pathlib.Path(outputdir).mkdir(parents=True, exist_ok=True)
 doRed = False
 doGreen = False
 doBlue = False
+doBin = False
 if args.red:
     doRed = True
     print("Produce red channel FITS files")
@@ -91,6 +93,9 @@ elif args.blue:
 else:
     doGreen = True
     print("Produce green channel FITS files")
+if args.bin:
+    doBin = True
+    print("2x2 bin files (1/2 resolution)")
 
 # Go through the lights
 lightfiles = []
@@ -110,22 +115,40 @@ for f in lightfiles:
         # Load file into list of HDU list 
         with fits.open(lfile) as hduList:
             data = hduList[0].data
-            hduList[0].header.set('FOVXREF', hduList[0].header['FOVXREF'] // 2)
-            hduList[0].header.set('FOVYREF', hduList[0].header['FOVYREF'] // 2)
             img_dtype = hduList[0].data.dtype
             # If making red, split out red channel
-            if doRed:
-                hduList[0].data = data[::2,::2]
-                hduList.writeto(os.path.join(outputdir, "red-{0:05d}.fits".format(cnt)), overwrite=True)
-            # If making green, split out green channels
-            if doGreen:
-                hduList[0].data = (data[1::2,::2] + data[::2,1::2]) / 2
-                hduList[0].data = hduList[0].data.astype(img_dtype)
-                hduList.writeto(os.path.join(outputdir, "green-{0:05d}.fits".format(cnt)), overwrite=True)
-            # If making blue, split out blue channels
-            if doBlue:
-                hduList[0].data = data[1::2,1::2]
-                hduList.writeto(os.path.join(outputdir, "blue-{0:05d}.fits".format(cnt)), overwrite=True)
+            if doBin:
+                hduList[0].header.set('FOVXREF', hduList[0].header['FOVXREF'] // 2)
+                hduList[0].header.set('FOVYREF', hduList[0].header['FOVYREF'] // 2)
+                if doRed:
+                    hduList[0].data = data[::2,::2]
+                    hduList.writeto(os.path.join(outputdir, "red-{0:05d}.fits".format(cnt)), overwrite=True)
+                # If making green, split out green channels
+                if doGreen:
+                    hduList[0].data = (data[1::2,::2] + data[::2,1::2]) / 2
+                    hduList[0].data = hduList[0].data.astype(img_dtype)
+                    hduList.writeto(os.path.join(outputdir, "green-{0:05d}.fits".format(cnt)), overwrite=True)
+                # If making blue, split out blue channels
+                if doBlue:
+                    hduList[0].data = data[1::2,1::2]
+                    hduList.writeto(os.path.join(outputdir, "blue-{0:05d}.fits".format(cnt)), overwrite=True)
+            else:
+                new_image_data = demosaicing_CFA_Bayer_bilinear(hduList[0].data, "RGGB")
+                if doRed:
+                    hduList[0].data = new_image_data @ np.array([ 1, 0, 0 ])
+                    hduList[0].data = hduList[0].data.astype(img_dtype)
+                    hduList.writeto(os.path.join(outputdir, "red-{0:05d}.fits".format(cnt)), overwrite=True)
+                # If making green, split out green channels
+                if doGreen:
+                    hduList[0].data = new_image_data @ np.array([ 0, 1, 0 ])
+                    hduList[0].data = hduList[0].data.astype(img_dtype)
+                    hduList.writeto(os.path.join(outputdir, "green-{0:05d}.fits".format(cnt)), overwrite=True)
+                # If making blue, split out blue channels
+                if doBlue:
+                    hduList[0].data = new_image_data @ np.array([ 0, 0, 1 ])
+                    hduList[0].data = hduList[0].data.astype(img_dtype)
+                    hduList.writeto(os.path.join(outputdir, "blue-{0:05d}.fits".format(cnt)), overwrite=True)
+
             cnt = cnt + 1
     except OSError as e:
         logger.error("Error: file %s - %s (%s)" % (f, e.__class__, e))     
