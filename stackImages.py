@@ -7,6 +7,7 @@ from astropy.wcs import WCS, FITSFixedWarning
 from astropy.time import Time
 import numpy as np
 import logging
+import astroalign as aa
 
 import warnings
 # UTC to BJD converter import
@@ -21,7 +22,7 @@ except ImportError:  # package import
 warnings.simplefilter('ignore', category=FITSFixedWarning)
 
 # create logger
-logger = logging.getLogger('processExoplanetTransit')
+logger = logging.getLogger('stackImages')
 logger.setLevel(logging.DEBUG)
 ch = logging.StreamHandler()
 ch.setLevel(logging.DEBUG)
@@ -33,7 +34,6 @@ logger.addHandler(ch)
 parser = argparse.ArgumentParser()
 # Add input argument
 parser.add_argument("-i", "--input", help = "Source image directory", required=True);
-parser.add_argument("-d", "--darks", help = "Darks directory", required=True);
 # Adding output argument
 parser.add_argument("-o", "--output", help = "Output stacked image directory") 
 parser.add_argument("--stacktime", help = "Number of seconds to stack (default 120)") 
@@ -43,9 +43,6 @@ try:
     args = parser.parse_args()
 except argparse.ArgumentError:
     os.exit(1)
-darksrcdir='darks'
-if args.darks:
-    darksrcdir = args.darks 
 outputdir='output'
 if args.output: 
     outputdir = args.output
@@ -61,25 +58,10 @@ pathlib.Path(outputdir).mkdir(parents=True, exist_ok=True)
 tmppath = os.path.join(outputdir, "tmp")
 pathlib.Path(tmppath).mkdir(parents=True, exist_ok=True)
 
-ch2 = logging.FileHandler(os.path.join(outputdir, 'processExoplanetTransit.log'), encoding='utf-8', mode='w')
+ch2 = logging.FileHandler(os.path.join(outputdir, 'stackImages.log'), encoding='utf-8', mode='w')
 ch2.setLevel(logging.DEBUG)
 ch2.setFormatter(formatter)
 logger.addHandler(ch2)
-
-darkfiles = []
-# Go through the darks
-for path in os.listdir(darksrcdir):
-    dfile = os.path.join(darksrcdir, path)
-    if (path.startswith('.')): continue
-    # check if current path is a file
-    if os.path.isfile(dfile):
-        darkfiles.append(path)
-darkfiles.sort()
-# Build dark frame, if we have any to work with
-dark = fits.HDUList()
-if len(darkfiles) > 0:
-    logger.info(f"Processing {len(darkfiles)} darks")
-    dark = buildMedianStack(darksrcdir, darkfiles, "master-dark.fits")
 
 # Go through the inputs
 lightfiles = []
@@ -93,43 +75,73 @@ lightfiles.sort()
 
 cnt = 0
 stackedcnt = 0
-timeaccumlist = []
+timeaccumcnt = 0
 timeaccumstart = 0
-timeaccumra = 0
-timeaccumdec = 0
+timeaccumlast = 0
+firstframe = None
+accumulatorframe = None
+accumulatorcounts = None
+
 mjdobs = 0
 mjdend = 0
 
-for f in lightfiles:
+lastidx = len(lightfiles) - 1
+for idx in range(lastidx + 1):
+    f = lightfiles[idx]
     try:
         lfile = os.path.join(inputdir, f)
         # Load file into list of HDU list 
         with fits.open(lfile) as hduList:
             imagedata = hduList[0].data
-            print(f"imagedata.shape={imagedata.shape}")
-            # Dark subtract, if we have darks
-            if len(dark) > 0:
-                # Clamp the data with the dark from below, so we can subtract without rollover
-                dat = np.maximum(imagedata, dark[0].data)
-                # And subtract the dark
-                imagedata = np.subtract(dat, dark[0].data)
-            print(f"imagedata.shape={imagedata.shape}")
-            red, green, blue = scaleAndDemosaicImage(imagedata)
-            tobs = hduList[0].header['MJD-OBS'] * 24 * 60 # MJD in minutes
-            # End of accumulator?
-            if (len(timeaccumlist) > 0) and ((timeaccumstart + stacktime) < tobs):
-                stackout = os.path.join(outputdir, "stack-%04d.fits" % stackedcnt)
-                tmpout = os.path.join(tmppath, "tmpstack.fits")
-                timeaccumlist = []
+            mjdstart = hduList[0].header['MJD-OBS']
+            if timeaccumcnt == 0:
+                mjdobs = mjdstart
+                datestart = hduList[0].header['DATE-OBS']
+                dateend = hduList[0].header['DATE-END']
+                timeaccumstart = mjdstart * 24 * 60 * 60
+                firstframe = imagedata
+                accumulatorframe = imagedata.astype(np.float64)
+                accumulatorcounts = np.ones(accumulatorframe.shape)
+                mjdend = hduList[0].header['MJD-END']
+                timeaccumcnt += 1
+            else:
+                # Find transformed image to align with first one
+                try:
+                    registered_image, footprint = aa.register(imagedata, firstframe)
+                    accumulatorcounts[footprint == False] += 1
+                    accumulatorframe[footprint == False] += registered_image[footprint == False]
+                    mjdend = hduList[0].header['MJD-END']
+                    dateend = hduList[0].header['DATE-END']
+                    timeaccumcnt += 1
+                except ValueError as e:
+                    print("Error: Cannot find transform for file %s - %s (%s)" % (f, e.__class__, e))                         
+                except aa.MaxIterError as e:
+                    print("Error: Cannot find transform for file %s - %s (%s)" % (f, e.__class__, e))                         
+            tobs = mjdend * 24 * 60 * 60  # MJD in seconds
+            # Past end of accumulator?
+            if (timeaccumcnt > 0) and (((timeaccumstart + stacktime) < tobs) or (idx == lastidx)):
+                print(f"Accumulated {timeaccumcnt} frames from {mjdobs} to {mjdend} into frame {stackedcnt}")
+                hduList[0].header.set("MJD-OBS", mjdobs)
+                hduList[0].header.set("MJD-MID", (mjdobs + mjdend) / 2)
+                hduList[0].header.set("MJD-END", mjdend)
+                hduList[0].header.set("EXPTIME", (mjdend - mjdobs) * 24 * 3600)
+                hduList[0].header.set("DATE-OBS", datestart)
+                hduList[0].header.set("DATE-END", dateend)
+                stime = Time(datestart)
+                etime = Time(dateend)
+                mtime = Time((stime.jd + etime.jd) / 2, format="jd", scale="tt")
+                mtime.format = "isot"
+                hduList[0].header.set("DATE-AVG", mtime.to_string())
+                hduList[0].data = accumulatorframe / accumulatorcounts
+                hduList[0].data = hduList[0].data.astype(np.float32)
+                hduList.writeto(os.path.join(outputdir, f"stack-{stackedcnt}.fits"), overwrite=True)
+                stackedcnt = stackedcnt + 1
+                # Reset accumulator
+                timeaccumcnt = 0
                 timeaccumstart = 0
-            timeaccumlist.append(lfile)
-            mjdend = hduList[0].header['MJD-END']
         cnt = cnt + 1
     except OSError as e:
         print("Error: file %s - %s (%s)" % (f, e.__class__, e))     
-# Final accumulator?
-if len(timeaccumlist) > 0:
-    stackout = os.path.join(outputdir, "stack-%04d.fits" % stackedcnt)
 
 print("Processed %d images into %d stacked images" % (cnt, stackedcnt))
 
