@@ -67,7 +67,8 @@ parser.add_argument('-g', "--green", action='store_true')
 parser.add_argument('-b', "--blue", action='store_true')
 parser.add_argument("-G", "--gray", action='store_true')
 parser.add_argument('-B', "--bin", action='store_true')
-parser.add_argument("--stacktime", help = "Number of seconds to stack (default 120)") 
+parser.add_argument("-st", "--stacktime", help = "Number of seconds to stack (default 120)") 
+parser.add_argument("-sm", "--stackmin", help = "Minimum number of frames per stack (default 5)") 
 parser.add_argument('-ss', "--supersample", help = "Supersample scale")
 # Read arguments from command line
 try:
@@ -112,6 +113,9 @@ if args.stacktime:
 supersample = 2
 if args.supersample:
     supersample = int(args.supersample) 
+stackmin = 5
+if args.stackmin:
+    stackmin = int(args.stackmin) 
 
 doRed = False
 doGreen = False
@@ -200,7 +204,7 @@ timeaccumlast = 0
 firstframe = None
 accumulatorframe = None
 accumulatorcounts = None
-
+accumfname = None
 mjdobs = 0
 mjdend = 0
 
@@ -252,15 +256,43 @@ for idx in range(lastidx + 1):
                     data = data @ np.array([ 0.2125, 0.7154, 0.0721 ]);
             # And stack image
             mjdstart = hduList[0].header['MJD-OBS']
+            mjdend = hduList[0].header['MJD-END']
+            dateend = hduList[0].header['DATE-END']
+            # If past end of our limit, or last image, flush
+            tobs = mjdend * 24 * 60 * 60  # MJD in seconds
+            if (timeaccumcnt > 0) and (((timeaccumstart + stacktime) < tobs) or (idx == lastidx)):
+                if timeaccumcnt < stackmin:
+                    print(f"Skip frames from {mjdobs} to {mjdend}")
+                else:
+                    print(f"Accumulated {timeaccumcnt} frames from {mjdobs} to {mjdend} into frame {stackedcnt}")
+                    with fits.open(accumfname) as hduStackList:
+                        hduStackList[0].header.set("MJD-OBS", mjdobs)
+                        hduStackList[0].header.set("MJD-MID", (mjdobs + mjdend) / 2)
+                        hduStackList[0].header.set("MJD-END", mjdend)
+                        hduStackList[0].header.set("EXPTIME", (mjdend - mjdobs) * 24 * 3600)
+                        hduStackList[0].header.set("DATE-OBS", datestart)
+                        hduStackList[0].header.set("DATE-END", dateend)
+                        stime = Time(datestart)
+                        etime = Time(dateend)
+                        mtime = Time((stime.jd + etime.jd) / 2, format="jd", scale="tt")
+                        mtime.format = "isot"
+                        hduStackList[0].header.set("DATE-AVG", mtime.to_string())
+                        accumulatorframe /= accumulatorcounts
+                        hduStackList[0].data = scaleDown(accumulatorframe, supersample, np.float32)
+                        hduStackList.writeto(os.path.join(outputdir, f"stack-{stackedcnt}.fits"), overwrite=True)
+                    stackedcnt = stackedcnt + 1
+                # Reset accumulator
+                timeaccumcnt = 0
+                timeaccumstart = 0
+            # If first file of new accumulator, add it
             if timeaccumcnt == 0:
+                accumfname = lfile
                 mjdobs = mjdstart
                 datestart = hduList[0].header['DATE-OBS']
-                dateend = hduList[0].header['DATE-END']
                 timeaccumstart = mjdstart * 24 * 60 * 60
                 firstframe = scaleUp(data, supersample)
                 accumulatorframe = np.copy(firstframe)
                 accumulatorcounts = np.ones(accumulatorframe.shape, dtype=np.int32)
-                mjdend = hduList[0].header['MJD-END']
                 timeaccumcnt += 1
             else:
                 # Find transformed image to align with first one
@@ -268,35 +300,11 @@ for idx in range(lastidx + 1):
                     registered_image, footprint = aa.register(data, firstframe)
                     accumulatorcounts[footprint == False] += 1
                     accumulatorframe[footprint == False] += registered_image[footprint == False]
-                    mjdend = hduList[0].header['MJD-END']
-                    dateend = hduList[0].header['DATE-END']
                     timeaccumcnt += 1
                 except ValueError as e:
                     print("Error: Cannot find transform for file %s - %s (%s)" % (f, e.__class__, e))                         
                 except aa.MaxIterError as e:
                     print("Error: Cannot find transform for file %s - %s (%s)" % (f, e.__class__, e))                         
-            tobs = mjdend * 24 * 60 * 60  # MJD in seconds
-            # Past end of accumulator?
-            if (timeaccumcnt > 0) and (((timeaccumstart + stacktime) < tobs) or (idx == lastidx)):
-                print(f"Accumulated {timeaccumcnt} frames from {mjdobs} to {mjdend} into frame {stackedcnt}")
-                hduList[0].header.set("MJD-OBS", mjdobs)
-                hduList[0].header.set("MJD-MID", (mjdobs + mjdend) / 2)
-                hduList[0].header.set("MJD-END", mjdend)
-                hduList[0].header.set("EXPTIME", (mjdend - mjdobs) * 24 * 3600)
-                hduList[0].header.set("DATE-OBS", datestart)
-                hduList[0].header.set("DATE-END", dateend)
-                stime = Time(datestart)
-                etime = Time(dateend)
-                mtime = Time((stime.jd + etime.jd) / 2, format="jd", scale="tt")
-                mtime.format = "isot"
-                hduList[0].header.set("DATE-AVG", mtime.to_string())
-                accumulatorframe /= accumulatorcounts
-                hduList[0].data = scaleDown(accumulatorframe, supersample, np.float32)
-                hduList.writeto(os.path.join(outputdir, f"stack-{stackedcnt}.fits"), overwrite=True)
-                stackedcnt = stackedcnt + 1
-                # Reset accumulator
-                timeaccumcnt = 0
-                timeaccumstart = 0
         cnt = cnt + 1
     except OSError as e:
         print("Error: file %s - %s (%s)" % (f, e.__class__, e))     
