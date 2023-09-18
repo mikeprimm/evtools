@@ -272,6 +272,8 @@ for idx in range(lastidx + 1):
                         hduStackList[0].header.set("EXPTIME", (mjdend - mjdobs) * 24 * 3600)
                         hduStackList[0].header.set("DATE-OBS", datestart)
                         hduStackList[0].header.set("DATE-END", dateend)
+                        hduStackList[0].header.set("BZERO", 0)
+                        hduStackList[0].header.set("BSCALE", 1)
                         stime = Time(datestart)
                         etime = Time(dateend)
                         mtime = Time((stime.jd + etime.jd) / 2, format="jd", scale="tt")
@@ -301,9 +303,7 @@ for idx in range(lastidx + 1):
                     accumulatorcounts[footprint == False] += 1
                     accumulatorframe[footprint == False] += registered_image[footprint == False]
                     timeaccumcnt += 1
-                except ValueError as e:
-                    print("Error: Cannot find transform for file %s - %s (%s)" % (f, e.__class__, e))                         
-                except aa.MaxIterError as e:
+                except (ValueError, aa.MaxIterError, IndexError) as e:
                     print("Error: Cannot find transform for file %s - %s (%s)" % (f, e.__class__, e))                         
         cnt = cnt + 1
     except OSError as e:
