@@ -25,12 +25,17 @@ logger.addHandler(ch)
 
 # Initialize parser
 parser = argparse.ArgumentParser()
-parser.add_argument("--target", help = "Target Name", required = True)
+parser.add_argument("-t", "--target", help = "Target Name", required = True)
+parser.add_argument("-d", "--duration", type=float)
 # Read arguments from command line
 try:
     args = parser.parse_args()
 except argparse.ArgumentError:
     os.exit(1)
+
+duration = 1.0
+if (args.duration):
+    duration = float(args.duration)
 
 logger.info("args=%s" % args)
 
@@ -47,5 +52,7 @@ if tic:
     bestgain, exptime = unistellarBestGainAndExp(vmag)
     logger.info(f"Unistellar: best gain = {bestgain} db, exposure time = {exptime} ms")
 
-url = unstellarExoplanetURL(args.target)
-logger.info(f"Unistellar URL (for 1 hour): {url}")
+url = unstellarExoplanetURL(args.target, 10)
+logger.info(f"Unistellar URL (for 10 seconds): {url}")
+url = unstellarExoplanetURL(args.target, duration * 3600)
+logger.info(f"Unistellar URL (for {duration} hours): {url}")

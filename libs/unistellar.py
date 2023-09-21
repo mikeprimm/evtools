@@ -30,7 +30,7 @@ def unistellarBestGainAndExp(vmag):
         # Go down by hundreds
         exptime = floor((exptime - 100) / 100) * 100        
     return bestgain, exptime
-def unstellarExoplanetURL(target):
+def unstellarExoplanetURL(target, duration = 3600):
     tic = exofop_getticid(target)
     if tic is None:
         return None
@@ -41,4 +41,4 @@ def unstellarExoplanetURL(target):
     bestgain, exptime = unistellarBestGainAndExp(vmag)
     if bestgain is None:
         return None
-    return f"unistellar://science/transit?ra={curpos.ra.deg:.5f}&dec={curpos.dec.deg:.5f}&c=3970&et={exptime}&g={bestgain}&d=3600"
+    return f"unistellar://science/transit?ra={curpos.ra.deg:.5f}&dec={curpos.dec.deg:.5f}&c=3970&et={exptime}&g={bestgain}&d={int(duration)}"
