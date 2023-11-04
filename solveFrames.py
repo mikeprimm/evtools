@@ -56,7 +56,7 @@ def runsolving(ra, dec, infile, outfile):
             "--new-fits", outfile ]
         #logger.info(f"args={args}")
         rslt = subprocess.run(args, 
-            timeout=10, capture_output=True)
+            timeout=20, capture_output=True)
         if rslt.returncode != 0 or (not isfile(outfile)):
             logger.error("Error solving %s - skipping" % f)
             #logger.error(rslt.stdout)

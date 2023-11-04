@@ -129,6 +129,7 @@ elif args.gray:
     doGray = True
     print("Produce grayscale channel FITS files")
 elif args.blue:
+    doBlue = True
     print("Produce blue channel FITS files")
 else:
     doGreen = True
