@@ -1,0 +1,1 @@
+2023-11-08 21:08:38,196 INFO - args=Namespace(darks=None, science=None, darkflats=None, flats=None, output=None, red=False, green=False, blue=False, gray=False, bin=False, stacktime=None, stackmin=None, supersample=None)

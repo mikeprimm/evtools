@@ -49,7 +49,7 @@ def runsolving(ra, dec, infile, outfile):
             "--dec", str(dec),
             "--radius", "5",
             # All Unistellar scopes are between 1 and 2 arcsec per pixel
-            "--scale-low", "1",
+            "--scale-low", "0.5",
             "--scale-high", "2",
              "--scale-units", "arcsecperpix",
             "--fits-image",
@@ -83,6 +83,9 @@ parser.add_argument("-t", "--target", help = "Target Name (EXOFOP)")
 parser.add_argument("--ra", help = "Target RA")
 parser.add_argument("--dec", help = "Target Dec")
 parser.add_argument("-bb", "--borderbuffer", help="Border buffer (pixels)", type=int)
+parser.add_argument("--obslat", help = "Observatory Latitude (deg)")
+parser.add_argument("--obslon", help = "Observatory Longitude (deg east)")
+parser.add_argument("--obsalt", help = "Observatory Altitude (meters)")
 # Read arguments from command line
 try:
     args = parser.parse_args()
@@ -91,6 +94,22 @@ except argparse.ArgumentError:
 outputdir='output'
 if args.output: 
     outputdir = args.output
+obsAltitude = None
+obsLatitude = None
+obsLongitude = None
+if os.environ.get("OBSALT") is not None:
+    obsAltitude = float(os.environ.get("OBSALT"))
+if os.environ.get("OBSLAT") is not None:
+    obsLatitude = float(os.environ.get("OBSLAT"))
+if os.environ.get("OBSLON") is not None:
+    obsLongitude = float(os.environ.get("OBSLON"))
+if args.obslat:
+    obsLatitude = float(args.obslat)
+if args.obslon:
+    obsLongitude = float(args.obslon)
+if args.obsalt:
+    obsAltitude = float(args.obsalt)
+
 # Add file logger
 pathlib.Path(outputdir).mkdir(parents=True, exist_ok=True)
 ch2 = logging.FileHandler(os.path.join(outputdir, 'solveFrames.log'), encoding='utf-8', mode='w')
@@ -151,11 +170,30 @@ for f in lightfiles:
         # Load file into list of HDU list 
         with fits.open(lfile) as hduList:
             if cnt == 0:
+                if obsAltitude is None:
+                    obsAltitude = hduList[0].header.get('ALTITUDE')
+                if obsLatitude is None:
+                    obsLatitude = hduList[0].header.get('LATITUDE')
+                if obsLongitude is None:
+                    obsLongitude = hduList[0].header.get('LONGITUD')
                 if target:
-                    targetNow = target.apply_space_motion(new_obstime = Time(hduList[0].header['MJD-MID'], format='mjd'))
+                    new_obstime = Time(hduList[0].header['MJD-MID'], format='mjd')
+                    targetNow = target.apply_space_motion(new_obstime)
                     logger.info("Target coords (obs date): RA=%d:%d:%f, Dec=%s%d:%d:%f" % (targetNow.ra.hms.h, targetNow.ra.hms.m, targetNow.ra.hms.s, '+' if targetNow.dec.signed_dms.sign >= 0 else '-', targetNow.dec.signed_dms.d, targetNow.dec.signed_dms.m, targetNow.dec.signed_dms.s))
                     targetRA = targetNow.ra.deg
                     targetDec = targetNow.dec.deg
+                if targetRA is None:
+                    targetRA = hduList[0].header.get('FOVRA')
+                    targetDec = hduList[0].header.get('FOVDEC')
+                    target = SkyCoord(targetRA, targetDec, frame='icrs', unit=(u.deg, u.deg))
+                
+            if targetRA is not None and obsLatitude is not None:
+                # Add alt-az for target
+                altaz = calcAltAz(targetRA, targetDec, obsLatitude, obsLongitude, obsAltitude, hduList[0].header['MJD-MID'])
+                # Add AIRMASS
+                hduList[0].header.set('AIRMASS', float(altaz.secz))
+            elif cnt == 0:
+                logger.info("Cannot compute AIRMASS without target and observatory")
             hduList.writeto(os.path.join(tmppath, "tmp.fits"), overwrite=True)
             # Now run solve-field to generate final file
             rslt = runsolving(hduList[0].header['FOVRA'], hduList[0].header['FOVDEC'],
