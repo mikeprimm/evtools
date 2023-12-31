@@ -70,6 +70,8 @@ parser.add_argument('-B', "--bin", action='store_true')
 parser.add_argument("-st", "--stacktime", help = "Number of seconds to stack (default 120)") 
 parser.add_argument("-sm", "--stackmin", help = "Minimum number of frames per stack (default 5)") 
 parser.add_argument('-ss', "--supersample", help = "Supersample scale")
+parser.add_argument('-sk', "--skip", help = "Skip frames (every Nth frame)")
+
 # Read arguments from command line
 try:
     args = parser.parse_args()
@@ -116,6 +118,9 @@ if args.supersample:
 stackmin = 5
 if args.stackmin:
     stackmin = int(args.stackmin) 
+skipcnt = 1
+if args.skip:
+    skipcnt = int(args.skip) 
 
 doRed = False
 doGreen = False
@@ -212,6 +217,8 @@ mjdend = 0
 lastidx = len(lightfiles) - 1
 
 for idx in range(lastidx + 1):
+    if (skipcnt > 0) and ((idx % skipcnt) != 0):
+        continue
     f = lightfiles[idx]
     try:
         lfile = os.path.join(sciencesrcdir, f)
