@@ -216,6 +216,8 @@ mjdend = 0
 
 lastidx = len(lightfiles) - 1
 
+bayerpat = None
+
 for idx in range(lastidx + 1):
     if (skipcnt > 0) and ((idx % skipcnt) != 0):
         continue
@@ -225,6 +227,13 @@ for idx in range(lastidx + 1):
         # Load file into list of HDU list 
         with fits.open(lfile) as hduList:
             data = hduList[0].data.astype(np.float64)
+            if bayerpat is None:
+                if 'BAYERPAT' in hduList[0].header:
+                    bayerpat = hduList[0].header['BAYERPAT']
+                    bayerpat = bayerpat[0:4]
+                else:
+                    bayerpat = "RGGB"
+                print(f"Bayer pattern={bayerpat}")
             # First, calibrate image
             if len(dark) > 0:
                 # Clamp the data with the dark from below, so we can subtract without rollover
@@ -250,7 +259,7 @@ for idx in range(lastidx + 1):
                 else:
                     print("gray not supported with binning")                    
             else:
-                data = demosaicing_CFA_Bayer_bilinear(data, "RGGB")
+                data = demosaicing_CFA_Bayer_bilinear(data, bayerpat)
                 if doRed:
                     data = data @ np.array([ 1, 0, 0 ])
                 # If making green, split out green channels
@@ -262,6 +271,7 @@ for idx in range(lastidx + 1):
                 # If making grayscale
                 elif doGray:
                     data = data @ np.array([ 0.2125, 0.7154, 0.0721 ]);
+            hduList[0].header.remove('BAYERPAT')
             # And stack image
             mjdstart = hduList[0].header['MJD-OBS']
             mjdend = hduList[0].header['MJD-END']

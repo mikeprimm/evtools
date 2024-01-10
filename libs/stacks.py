@@ -24,6 +24,12 @@ def buildMedianStack(filedir: str, files: list, outfile: str):
         # Now compute median for each pixel
         accum = np.median(accum, axis=0)
         stack[0].data = accum.astype(np.uint16)
+        # Handle broken size for early Odyssey darks
+        if stack[0].data.shape[0] == 2190:
+            print("Resize broken Odyssey darks")
+            newsize = np.zeros((2192, stack[0].data.shape[1]), dtype=np.uint16)
+            newsize[1:2191] = stack[0].data[0:2190]
+            stack[0].data = newsize
         # And write output, if provided
         if outfile:
             stack.writeto(os.path.join(filedir, outfile), overwrite=True)
