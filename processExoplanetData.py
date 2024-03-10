@@ -7,9 +7,11 @@ import time
 from astropy.io import fits
 from astropy.wcs import FITSFixedWarning
 from astropy.time import Time
+from skimage.util import view_as_windows
 import astroalign as aa
 import numpy as np
 import warnings
+import traceback
 from colour_demosaicing import demosaicing_CFA_Bayer_bilinear
 
 try:
@@ -89,7 +91,7 @@ logger.addHandler(ch2)
 
 logger.info("args=%s" % args)
 
-darksrcdir='darks'
+darksrcdir=None
 if args.darks:
     darksrcdir = args.darks 
 sciencesrcdir='science'
@@ -127,17 +129,21 @@ doGreen = False
 doBlue = False
 doGray = False
 doBin = False
+filter = "CV"
 if args.red:
     doRed = True
+    filter = "CR"
     print("Produce red channel FITS files")
 elif args.gray:
     doGray = True
     print("Produce grayscale channel FITS files")
 elif args.blue:
     doBlue = True
+    filter = "CB"
     print("Produce blue channel FITS files")
 else:
     doGreen = True
+    filter = "CG"
     print("Produce green channel FITS files")
 if args.bin:
     doBin = True
@@ -145,14 +151,15 @@ if args.bin:
 
 darkfiles = []
 # Go through the darks
-for path in os.listdir(darksrcdir):
-    dfile = os.path.join(darksrcdir, path)
-    if (path.startswith('.')): continue
-    if (path.startswith('master-dark.fits')): continue
-    # check if current path is a file
-    if os.path.isfile(dfile):
-        darkfiles.append(path)
-darkfiles.sort()
+if darksrcdir:
+    for path in os.listdir(darksrcdir):
+        dfile = os.path.join(darksrcdir, path)
+        if (path.startswith('.')): continue
+        if (path.startswith('master-dark.fits')): continue
+        # check if current path is a file
+        if os.path.isfile(dfile):
+            darkfiles.append(path)
+    darkfiles.sort()
 # Go through the lights
 lightfiles = []
 for path in os.listdir(sciencesrcdir):
@@ -248,16 +255,28 @@ for idx in range(lastidx + 1):
             if doBin:
                 hduList[0].header.set('FOVXREF', hduList[0].header['FOVXREF'] // 2)
                 hduList[0].header.set('FOVYREF', hduList[0].header['FOVYREF'] // 2)
-                if doRed:
-                    data = data[::2,::2]
-                # If making green, split out green channels
-                elif doGreen:
-                    data = (data[1::2,::2] + data[::2,1::2]) / 2
-                # If making blue, split out blue channels
-                elif doBlue:
-                    data = data[1::2,1::2]
-                else:
-                    print("gray not supported with binning")                    
+                if bayerpat == "RGGB":
+                    if doRed:
+                        data = data[::2,::2]
+                    # If making green, split out green channels
+                    elif doGreen:
+                        data = (data[1::2,::2] + data[::2,1::2]) / 2
+                    # If making blue, split out blue channels
+                    elif doBlue:
+                        data = data[1::2,1::2]
+                    else:
+                        print("gray not supported with binning")                    
+                else:  # Assume GBRG
+                    if doRed:
+                        data = data[1::2,::2]
+                    # If making green, split out green channels
+                    elif doGreen:
+                        data = (data[::2,::2] + data[1::2,1::2]) / 2
+                    # If making blue, split out blue channels
+                    elif doBlue:
+                        data = data[::2,1::2]
+                    else:
+                        print("gray not supported with binning")                    
             else:
                 data = demosaicing_CFA_Bayer_bilinear(data, bayerpat)
                 if doRed:
@@ -292,6 +311,12 @@ for idx in range(lastidx + 1):
                         hduStackList[0].header.set("DATE-END", dateend)
                         hduStackList[0].header.set("BZERO", 0)
                         hduStackList[0].header.set("BSCALE", 1)
+                        hduStackList[0].header.set("FILTER", filter)
+                        hduStackList[0].header.remove("BAYERPAT")
+                        hduStackList[0].header.set('FOVXREF', fovxref)
+                        hduStackList[0].header.set('FOVYREF', fovyref)
+                        hduStackList[0].header.set('FOVRA', fovra)
+                        hduStackList[0].header.set('FOVDEC', fovdec)
                         stime = Time(datestart)
                         etime = Time(dateend)
                         mtime = Time((stime.jd + etime.jd) / 2, format="jd", scale="tt")
@@ -309,6 +334,10 @@ for idx in range(lastidx + 1):
                 accumfname = lfile
                 mjdobs = mjdstart
                 datestart = hduList[0].header['DATE-OBS']
+                fovxref = hduList[0].header['FOVXREF']
+                fovyref = hduList[0].header['FOVYREF']
+                fovra = hduList[0].header['FOVRA']
+                fovdec = hduList[0].header['FOVDEC']
                 timeaccumstart = mjdstart * 24 * 60 * 60
                 firstframe = scaleUp(data, supersample)
                 accumulatorframe = np.copy(firstframe)
@@ -317,11 +346,14 @@ for idx in range(lastidx + 1):
             else:
                 # Find transformed image to align with first one
                 try:
-                    registered_image, footprint = aa.register(data, firstframe)
+                    try:
+                        registered_image, footprint = aa.register(data, firstframe)
+                    except Exception:
+                        registered_image, footprint = aa.register(data, firstframe, detection_sigma=3)
                     accumulatorcounts[footprint == False] += 1
                     accumulatorframe[footprint == False] += registered_image[footprint == False]
                     timeaccumcnt += 1
-                except (ValueError, aa.MaxIterError, IndexError) as e:
+                except (ValueError, aa.MaxIterError, IndexError, TypeError) as e:
                     print("Error: Cannot find transform for file %s - %s (%s)" % (f, e.__class__, e))                         
         cnt = cnt + 1
     except OSError as e:

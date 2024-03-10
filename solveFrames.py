@@ -178,7 +178,10 @@ for f in lightfiles:
                     obsLongitude = hduList[0].header.get('LONGITUD')
                 if target:
                     new_obstime = Time(hduList[0].header['MJD-MID'], format='mjd')
-                    targetNow = target.apply_space_motion(new_obstime)
+                    if args.target:
+                        targetNow = target.apply_space_motion(new_obstime)
+                    else:
+                        targetNow = target
                     logger.info("Target coords (obs date): RA=%d:%d:%f, Dec=%s%d:%d:%f" % (targetNow.ra.hms.h, targetNow.ra.hms.m, targetNow.ra.hms.s, '+' if targetNow.dec.signed_dms.sign >= 0 else '-', targetNow.dec.signed_dms.d, targetNow.dec.signed_dms.m, targetNow.dec.signed_dms.s))
                     targetRA = targetNow.ra.deg
                     targetDec = targetNow.dec.deg
