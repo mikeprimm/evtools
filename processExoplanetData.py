@@ -54,13 +54,19 @@ formatter = logging.Formatter('%(asctime)s %(levelname)s - %(message)s')
 ch.setFormatter(formatter)
 logger.addHandler(ch)
 
+def dir_path(string):
+    if os.path.isdir(string):
+        return string
+    else:
+        raise NotADirectoryError(string)
+    
 # Initialize parser
 parser = argparse.ArgumentParser()
 # Add input argument
-parser.add_argument("-d", "--darks", help = "Dark files source directory");
-parser.add_argument("-s", "--science", help = "Science files source directory");
-parser.add_argument("-df", "--darkflats", help = "Dark flat files source directory");
-parser.add_argument("-f", "--flats", help = "Flat files source directory");
+parser.add_argument("-d", "--darks", help = "Dark files source directory", type=dir_path);
+parser.add_argument("-s", "--science", help = "Science files source directory", type=dir_path);
+parser.add_argument("-df", "--darkflats", help = "Dark flat files source directory", type=dir_path);
+parser.add_argument("-f", "--flats", help = "Flat files source directory", type=dir_path);
 # Adding output argument
 parser.add_argument("-o", "--output", help = "Output directory") 
 # Add flags (default is green)
@@ -130,6 +136,7 @@ doBlue = False
 doGray = False
 doBin = False
 filter = "CV"
+calstat = ""
 if args.red:
     doRed = True
     filter = "CR"
@@ -192,22 +199,26 @@ if flatsrcdir:
             flatfiles.append(path)
     flatfiles.sort()
 
-# Build dark frame, if we have any to work with
-dark = fits.HDUList()
-if len(darkfiles) > 0:
-    logger.info(f"Processing {len(darkfiles)} darks")
-    dark = buildMedianStack(darksrcdir, darkfiles, "master-dark.fits")
 # Build dark flat frame, if we have any to work with
 darkflat = fits.HDUList()
 if len(darkflatfiles) > 0:
     logger.info(f"Processing {len(darkflatfiles)} dark-flats")
     darkflat = buildMedianStack(darkflatsrcdir, darkflatfiles, "master-darkflat.fits")
+    calstat += "B"
+
+# Build dark frame, if we have any to work with
+dark = fits.HDUList()
+if len(darkfiles) > 0:
+    logger.info(f"Processing {len(darkfiles)} darks")
+    dark = buildMedianStack(darksrcdir, darkfiles, "master-dark.fits")
+    calstat += "D"
 
 # Build flat frame, if we have any to work with
 flat = fits.HDUList()
 if len(flatfiles) > 0:
     logger.info(f"Processing {len(flatfiles)} flats")
     normflataccum = buildMasterFlatStack(flatsrcdir, flatfiles, "master-flat.fits", darkflat)
+    calstat += "F"
     
 cnt = 0
 stackedcnt = 0
@@ -317,6 +328,8 @@ for idx in range(lastidx + 1):
                         hduStackList[0].header.set('FOVYREF', fovyref)
                         hduStackList[0].header.set('FOVRA', fovra)
                         hduStackList[0].header.set('FOVDEC', fovdec)
+                        if calstat != "":
+                            hduStackList[0].header.set('CALSTAT', calstat)
                         stime = Time(datestart)
                         etime = Time(dateend)
                         mtime = Time((stime.jd + etime.jd) / 2, format="jd", scale="tt")

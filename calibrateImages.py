@@ -98,6 +98,7 @@ if args.flats:
    pathlib.Path(flatpath).mkdir(parents=True, exist_ok=True)
 
 darkfiles = []
+calstat = ""
 # Go through the darks
 for path in os.listdir(darksrcdir):
     dfile = os.path.join(darksrcdir, path)
@@ -139,22 +140,26 @@ if flatsrcdir:
             flatfiles.append(path)
     flatfiles.sort()
 
-# Build dark frame, if we have any to work with
-dark = fits.HDUList()
-if len(darkfiles) > 0:
-    logger.info(f"Processing {len(darkfiles)} darks")
-    dark = buildMedianStack(darksrcdir, darkfiles, "master-dark.fits")
 # Build dark flat frame, if we have any to work with
 darkflat = fits.HDUList()
 if len(darkflatfiles) > 0:
     logger.info(f"Processing {len(darkflatfiles)} dark-flats")
     darkflat = buildMedianStack(darkflatsrcdir, darkflatfiles, "master-darkflat.fits")
+    calstat += "B"
+
+# Build dark frame, if we have any to work with
+dark = fits.HDUList()
+if len(darkfiles) > 0:
+    logger.info(f"Processing {len(darkfiles)} darks")
+    dark = buildMedianStack(darksrcdir, darkfiles, "master-dark.fits")
+    calstat += "D"
 
 # Build flat frame, if we have any to work with
 flat = fits.HDUList()
 if len(flatfiles) > 0:
     logger.info(f"Processing {len(flatfiles)} flats")
     normflataccum = buildMasterFlatStack(flatsrcdir, flatfiles, "master-flat.fits", darkflat)
+    calstat += "F"
     
 printfirst = True
 cnt = 0
@@ -177,6 +182,8 @@ for f in lightfiles:
             if len(flat) > 0:
                 hduList[0].data = hduList[0].data.astype(np.float32) / normflataccum
             hduList[0].data = hduList[0].data.astype(img_dtype)
+            if calstat != "":
+                hdrList[0].header.set("CALSTAT", calstat)
             hduList.writeto(newfits, overwrite=True)
             cnt = cnt + 1
     except OSError as e:

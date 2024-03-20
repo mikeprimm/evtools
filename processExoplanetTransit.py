@@ -237,6 +237,7 @@ else:
 if args.nosolve:
     solve = False
 darkfiles = []
+calstat = ""
 # Go through the darks
 for path in os.listdir(darksrcdir):
     dfile = os.path.join(darksrcdir, path)
@@ -278,23 +279,25 @@ if flatsrcdir:
             flatfiles.append(path)
     flatfiles.sort()
 
-# Build dark frame, if we have any to work with
-dark = fits.HDUList()
-if len(darkfiles) > 0:
-    logger.info(f"Processing {len(darkfiles)} darks")
-    dark = buildMedianStack(darksrcdir, darkfiles, "master-dark.fits")
 # Build dark flat frame, if we have any to work with
 darkflat = fits.HDUList()
 if len(darkflatfiles) > 0:
     logger.info(f"Processing {len(darkflatfiles)} dark-flats")
     darkflat = buildMedianStack(darkflatsrcdir, darkflatfiles, "master-darkflat.fits")
-
+    calstat += "B"
+# Build dark frame, if we have any to work with
+dark = fits.HDUList()
+if len(darkfiles) > 0:
+    logger.info(f"Processing {len(darkfiles)} darks")
+    dark = buildMedianStack(darksrcdir, darkfiles, "master-dark.fits")
+    calstat += "D"
 # Build flat frame, if we have any to work with
 flat = fits.HDUList()
 if len(flatfiles) > 0:
     logger.info(f"Processing {len(flatfiles)} flats")
     normflataccum = buildMasterFlatStack(flatsrcdir, flatfiles, "master-flat.fits", darkflat)
-    
+    calstat += "F"
+
 cnt = 0
 timeaccumlist = []
 timeaccumstart = 0
@@ -385,7 +388,8 @@ for f in lightfiles:
                 hduList[0].header.set('LATITUDE', obsLatitude, "latitude in degrees north of observing site")
             if ('LONGITUD' in hduList[0].header) == False:
                 hduList[0].header.set('LONGITUD', obsLongitude, "longitude in degrees east of observing site")
-
+            if calstat != "":
+                hdrList[0].header.set('CALSTAT', calstat)
             hduList[0].data = hduList[0].data.astype(img_dtype)
             hduList.writeto(newfits, overwrite=True)
         # if solved and we have target ra/dec, check it in field
