@@ -169,13 +169,31 @@ for f in lightfiles:
         newfits = os.path.join(outputdir, newfname)
         # Load file into list of HDU list 
         with fits.open(lfile) as hduList:
+            if 'FOVRA' in hduList[0].header:
+                RA = hduList[0].header.get('FOVRA')
+            if 'RA' in hduList[0].header:
+                RA = hduList[0].header.get('RA')
+            if 'FOVDEC' in hduList[0].header:
+                Dec = hduList[0].header.get('FOVDEC')
+            if 'DEC' in hduList[0].header:
+                Dec = hduList[0].header.get('DEC')
+
             if cnt == 0:
                 if obsAltitude is None:
-                    obsAltitude = hduList[0].header.get('ALTITUDE')
+                    if 'ALTITUDE' in hduList[0].header:
+                        obsAltitude = hduList[0].header.get('ALTITUDE')
+                    else:
+                        obsAltitude = 0
                 if obsLatitude is None:
-                    obsLatitude = hduList[0].header.get('LATITUDE')
+                    if 'LATITUDE' in hduList[0].header:
+                        obsLatitude = hduList[0].header.get('LATITUDE')
+                    elif 'SITELAT' in hduList[0].header:
+                        obsLatitude = hduList[0].header.get('SITELAT')                
                 if obsLongitude is None:
-                    obsLongitude = hduList[0].header.get('LONGITUD')
+                    if 'LONGITUD' in hduList[0].header:
+                        obsLongitude = hduList[0].header.get('LONGITUD')
+                    elif 'SITELONG' in hduList[0].header:
+                        obsLongitude = hduList[0].header.get('SITELONG')                
                 if target:
                     new_obstime = Time(hduList[0].header['MJD-MID'], format='mjd')
                     if args.target:
@@ -186,8 +204,8 @@ for f in lightfiles:
                     targetRA = targetNow.ra.deg
                     targetDec = targetNow.dec.deg
                 if targetRA is None:
-                    targetRA = hduList[0].header.get('FOVRA')
-                    targetDec = hduList[0].header.get('FOVDEC')
+                    targetRA = RA
+                    targetDec = Dec
                     target = SkyCoord(targetRA, targetDec, frame='icrs', unit=(u.deg, u.deg))
                 
             if targetRA is not None and obsLatitude is not None:
@@ -199,8 +217,7 @@ for f in lightfiles:
                 logger.info("Cannot compute AIRMASS without target and observatory")
             hduList.writeto(os.path.join(tmppath, "tmp.fits"), overwrite=True)
             # Now run solve-field to generate final file
-            rslt = runsolving(hduList[0].header['FOVRA'], hduList[0].header['FOVDEC'],
-                os.path.join(tmppath, "tmp.fits"), newfits )
+            rslt = runsolving(RA, Dec, os.path.join(tmppath, "tmp.fits"), newfits )
             if rslt == False:
                 print("Error solving %s - skipping" % f)
                 hduList.writeto(os.path.join(badoutputpath, f), overwrite=True)

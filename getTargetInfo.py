@@ -12,9 +12,9 @@ try:
 except ImportError:  # package import
     from libs.unistellar import unistellarBestGainAndExp, unstellarExoplanetURL
 try:
-    from .libs.exofop import exofop_getcompositeinfo, exofop_getticid
+    from .libs.exofop import exofop_getcompositeinfo, exofop_getticid, exofop_getparameters
 except ImportError: 
-    from libs.exofop import exofop_getcompositeinfo, exofop_getticid
+    from libs.exofop import exofop_getcompositeinfo, exofop_getticid, exofop_getparameters
 
 # create logger
 logger = logging.getLogger('getTargetInfo')
@@ -54,6 +54,7 @@ if args.target:
     else:
         logger.error("Tsrget not found")
         exit(1)
+    exofop_getparameters(tic)
 elif args.dec and args.ra and args.mag:
     skypos = SkyCoord(args.ra, args.dec, frame='icrs', unit=(u.hourangle, u.deg))
     vmag = float(args.mag)

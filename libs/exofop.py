@@ -63,3 +63,18 @@ def exofop_getcompositeinfo(tic):
         logging.error(f"EXOFOP error: {e}")
         return None, None
 
+@retry(stop=stop_after_delay(30))
+def exofop_getparameters(tic):
+    try:
+        url = f"https://exofop.ipac.caltech.edu/tess/target.php?id={tic}&json"
+        result = requests.get(url)
+        rsp = result.json()
+        print(rsp.keys())
+
+        # print(rsp['coordinates'])
+        print(rsp['planet_parameters'])
+        # print(rsp['stellar_parameters'])
+        return None, None
+    except Exception as e:
+        logging.error(f"EXOFOP error: {e}")
+        return None, None

@@ -13,6 +13,7 @@ import numpy as np
 import warnings
 import traceback
 from colour_demosaicing import demosaicing_CFA_Bayer_bilinear
+import dateutil.parser as dup
 
 try:
     from .libs.stacks import buildMedianStack, buildMasterFlatStack
@@ -29,6 +30,37 @@ from pandas import isna
 
 warnings.simplefilter('ignore', category=FITSFixedWarning)
 
+
+def exp_offset(hdr, time_unit, exp):
+    """Returns exposure offset (in days) of more than 0 if headers reveals
+    the time was estimated at the start of the exposure rather than the middle
+    """
+    if 'start' in hdr.comments[time_unit]:
+        return exp / (2.0 * 60.0 * 60.0 * 24.0)
+    return 0.0
+
+
+def ut_date(hdr, time_unit, exp):
+    """Converts the Gregorian Date to Julian Date from the header and returns it
+    along with the exposure offset
+    """
+    if time_unit == 'DATE-OBS':
+        greg_date = hdr[time_unit] if 'T' in hdr[time_unit] else f"{hdr[time_unit]}T{hdr['TIME-OBS']}"
+    else:
+        greg_date = hdr[time_unit]
+
+    dt = dup.parse(greg_date)
+    atime = Time(dt)
+
+    julian_time = atime.jd
+    offset = exp_offset(hdr, time_unit, exp)
+
+    return julian_time + offset
+
+def get_exp_time(hdr):
+    exp_list = ["EXPTIME", "EXPOSURE", "EXP"]
+    exp_time = next((exptime for exptime in exp_list if exptime in hdr), None)
+    return hdr[exp_time] if exp_time is not None else 0.0
 
 def scaleUp(ary: np.array, scale: int):
    if scale == 1:
@@ -235,6 +267,8 @@ mjdend = 0
 lastidx = len(lightfiles) - 1
 
 bayerpat = None
+dateend = None
+fovxref = None
 
 for idx in range(lastidx + 1):
     if (skipcnt > 0) and ((idx % skipcnt) != 0):
@@ -303,9 +337,18 @@ for idx in range(lastidx + 1):
                     data = data @ np.array([ 0.2125, 0.7154, 0.0721 ]);
             hduList[0].header.remove('BAYERPAT')
             # And stack image
-            mjdstart = hduList[0].header['MJD-OBS']
-            mjdend = hduList[0].header['MJD-END']
-            dateend = hduList[0].header['DATE-END']
+            if 'MJD-OBS' not in hduList[0].header:
+                offset = get_exp_time(hduList[0].header) / (24 * 60 * 60)
+                mjdmid = ut_date(hduList[0].header, "DATE-OBS", "EXPOSURE")
+                mjdstart = mjdmid - offset
+                mjdend = mjdmid + offset
+                end = Time(mjdend, format="jd", scale="tt")
+                end.format = "isot"
+                dateend = end.to_string()
+            else:
+                mjdstart = hduList[0].header['MJD-OBS']
+                mjdend = hduList[0].header['MJD-END']
+                dateend = hduList[0].header['DATE-END']
             # If past end of our limit, or last image, flush
             tobs = mjdend * 24 * 60 * 60  # MJD in seconds
             if (timeaccumcnt > 0) and (((timeaccumstart + stacktime) < tobs) or (idx == lastidx)):
@@ -324,10 +367,11 @@ for idx in range(lastidx + 1):
                         hduStackList[0].header.set("BSCALE", 1)
                         hduStackList[0].header.set("FILTER", filter)
                         hduStackList[0].header.remove("BAYERPAT")
-                        hduStackList[0].header.set('FOVXREF', fovxref)
-                        hduStackList[0].header.set('FOVYREF', fovyref)
-                        hduStackList[0].header.set('FOVRA', fovra)
-                        hduStackList[0].header.set('FOVDEC', fovdec)
+                        if fovxref is not None:
+                            hduStackList[0].header.set('FOVXREF', fovxref)
+                            hduStackList[0].header.set('FOVYREF', fovyref)
+                            hduStackList[0].header.set('FOVRA', fovra)
+                            hduStackList[0].header.set('FOVDEC', fovdec)
                         if calstat != "":
                             hduStackList[0].header.set('CALSTAT', calstat)
                         stime = Time(datestart)
@@ -347,10 +391,11 @@ for idx in range(lastidx + 1):
                 accumfname = lfile
                 mjdobs = mjdstart
                 datestart = hduList[0].header['DATE-OBS']
-                fovxref = hduList[0].header['FOVXREF']
-                fovyref = hduList[0].header['FOVYREF']
-                fovra = hduList[0].header['FOVRA']
-                fovdec = hduList[0].header['FOVDEC']
+                if 'FOVXREF' in hduList[0].header:
+                    fovxref = hduList[0].header['FOVXREF']
+                    fovyref = hduList[0].header['FOVYREF']
+                    fovra = hduList[0].header['FOVRA']
+                    fovdec = hduList[0].header['FOVDEC']
                 timeaccumstart = mjdstart * 24 * 60 * 60
                 firstframe = scaleUp(data, supersample)
                 accumulatorframe = np.copy(firstframe)
