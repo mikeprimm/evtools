@@ -153,7 +153,7 @@ pathlib.Path(tmppath).mkdir(parents=True, exist_ok=True)
 lightfiles = []
 for path in os.listdir(inputsrcdir):
     if (path.startswith('.')): continue
-    if not path.lower().endswith('.fits'):
+    if not (path.lower().endswith('.fits') or path.lower().endswith('.fits.gz')):
         continue
     dfile = os.path.join(inputsrcdir, path)
     # check if current path is a file
