@@ -388,7 +388,7 @@ for idx in range(lastidx + 1):
                         hduStackList[0].header.set("DATE-AVG", mtime.to_string())
                         accumulatorframe /= accumulatorcounts
                         hduStackList[0].data = scaleDown(accumulatorframe, supersample, np.float32)
-                        hduStackList.writeto(os.path.join(outputdir, "{0}-{1}-{2:05d}-{3}.fits".format(basename,filter, stackedcnt, mtime.to_string())), overwrite=True)
+                        hduStackList.writeto(os.path.join(outputdir, "{0}-{1}-{2:05d}-{3}.fits".format(basename,filter, stackedcnt, mtime.mjd)), overwrite=True)
                     stackedcnt = stackedcnt + 1
                 # Reset accumulator
                 timeaccumcnt = 0
