@@ -171,22 +171,23 @@ doGreen = False
 doBlue = False
 doGray = False
 doBin = False
-filter = "CV"
+filter = "V"
 calstat = ""
 if args.red:
     doRed = True
-    filter = "CR"
+    filter = "R"
     print("Produce red channel FITS files")
 elif args.gray:
     doGray = True
+    filter = "CV"
     print("Produce grayscale channel FITS files")
 elif args.blue:
     doBlue = True
-    filter = "CB"
+    filter = "B"
     print("Produce blue channel FITS files")
 else:
     doGreen = True
-    filter = "CG"
+    filter = "V"
     print("Produce green channel FITS files")
 if args.bin:
     doBin = True
@@ -387,7 +388,7 @@ for idx in range(lastidx + 1):
                         hduStackList[0].header.set("DATE-AVG", mtime.to_string())
                         accumulatorframe /= accumulatorcounts
                         hduStackList[0].data = scaleDown(accumulatorframe, supersample, np.float32)
-                        hduStackList.writeto(os.path.join(outputdir, "{0}-{1}-{2:05d}-{3}.fits.gz".format(basename,filter, stackedcnt, mtime.to_string())), overwrite=True)
+                        hduStackList.writeto(os.path.join(outputdir, "{0}-{1}-{2:05d}-{3}.fits".format(basename,filter, stackedcnt, mtime.to_string())), overwrite=True)
                     stackedcnt = stackedcnt + 1
                 # Reset accumulator
                 timeaccumcnt = 0
