@@ -101,6 +101,7 @@ parser.add_argument("-df", "--darkflats", help = "Dark flat files source directo
 parser.add_argument("-f", "--flats", help = "Flat files source directory", type=dir_path);
 # Adding output argument
 parser.add_argument("-o", "--output", help = "Output directory") 
+parser.add_argument("-t", "--target", help = "Target Name")
 # Add flags (default is green)
 parser.add_argument('-r', "--red", action='store_true')
 parser.add_argument('-g', "--green", action='store_true')
@@ -120,6 +121,9 @@ except argparse.ArgumentError:
 outputdir='output'
 if args.output: 
     outputdir = args.output
+basename = 'stack'
+if args.target:
+    basename = args.target
 # Add file logger
 pathlib.Path(outputdir).mkdir(parents=True, exist_ok=True)
 ch2 = logging.FileHandler(os.path.join(outputdir, 'processExoplanetData.log'), encoding='utf-8', mode='w')
@@ -374,6 +378,8 @@ for idx in range(lastidx + 1):
                             hduStackList[0].header.set('FOVDEC', fovdec)
                         if calstat != "":
                             hduStackList[0].header.set('CALSTAT', calstat)
+                        if args.target:
+                            hduStackList[0].header.set('OBJECT', args.target)
                         stime = Time(datestart)
                         etime = Time(dateend)
                         mtime = Time((stime.jd + etime.jd) / 2, format="jd", scale="tt")
@@ -381,7 +387,7 @@ for idx in range(lastidx + 1):
                         hduStackList[0].header.set("DATE-AVG", mtime.to_string())
                         accumulatorframe /= accumulatorcounts
                         hduStackList[0].data = scaleDown(accumulatorframe, supersample, np.float32)
-                        hduStackList.writeto(os.path.join(outputdir, "stack-{0:05d}.fits".format(stackedcnt)), overwrite=True)
+                        hduStackList.writeto(os.path.join(outputdir, "{0}-{1}-{2:05d}-{3}.fits.gz".format(basename,filter, stackedcnt, mtime.to_string())), overwrite=True)
                     stackedcnt = stackedcnt + 1
                 # Reset accumulator
                 timeaccumcnt = 0

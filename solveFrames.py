@@ -40,7 +40,7 @@ formatter = logging.Formatter('%(asctime)s %(levelname)s - %(message)s')
 ch.setFormatter(formatter)
 logger.addHandler(ch)
 
-def runsolving(ra, dec, infile, outfile):
+def runsolving(ra, dec, infile, outfile, cnt):
     try:
         args = ["solve-field", infile,
             "--no-remove-lines", "--uniformize", "0",
@@ -56,7 +56,7 @@ def runsolving(ra, dec, infile, outfile):
             "--new-fits", outfile ]
         #logger.info(f"args={args}")
         rslt = subprocess.run(args, 
-            timeout=20, capture_output=True)
+            timeout=20 if cnt != 0 else 120, capture_output=True)
         if rslt.returncode != 0 or (not isfile(outfile)):
             logger.error("Error solving %s - skipping" % f)
             #logger.error(rslt.stdout)
@@ -165,8 +165,8 @@ cnt = 0
 for f in lightfiles:
     try:
         lfile = os.path.join(inputsrcdir, f)
-        newfname = "science-{0:05d}.fits".format(cnt)
-        newfits = os.path.join(outputdir, newfname)
+        # newfname = "science-{0:05d}.fits".format(cnt)
+        newfits = os.path.join(outputdir, f)
         # Load file into list of HDU list 
         with fits.open(lfile) as hduList:
             if 'FOVRA' in hduList[0].header:
@@ -217,7 +217,7 @@ for f in lightfiles:
                 logger.info("Cannot compute AIRMASS without target and observatory")
             hduList.writeto(os.path.join(tmppath, "tmp.fits"), overwrite=True)
             # Now run solve-field to generate final file
-            rslt = runsolving(RA, Dec, os.path.join(tmppath, "tmp.fits"), newfits )
+            rslt = runsolving(RA, Dec, os.path.join(tmppath, "tmp.fits"), newfits, cnt )
             if rslt == False:
                 print("Error solving %s - skipping" % f)
                 hduList.writeto(os.path.join(badoutputpath, f), overwrite=True)
