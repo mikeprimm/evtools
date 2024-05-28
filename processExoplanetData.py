@@ -396,7 +396,11 @@ for idx in range(lastidx + 1):
             if timeaccumcnt > 0:
                 # Find transformed image to align with first one
                 try:
-                    registered_image, footprint = aa.register(data, firstframe)
+                    try:
+                        registered_image, footprint = aa.register(data, firstframe)
+                    except aa.MaxIterError:
+                        registered_image, footprint = aa.register(data, firstframe, detection_sigma=2, min_area=9)
+
                     accumulatorcounts[footprint == False] += 1
                     accumulatorframe[footprint == False] += registered_image[footprint == False]
                     timeaccumcnt += 1
