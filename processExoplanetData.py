@@ -251,7 +251,6 @@ if len(darkfiles) > 0:
     calstat += "D"
 
 # Build flat frame, if we have any to work with
-flat = fits.HDUList()
 if len(flatfiles) > 0:
     logger.info(f"Processing {len(flatfiles)} flats")
     normflataccum = buildMasterFlatStack(flatsrcdir, flatfiles, "master-flat.fits", darkflat)
@@ -298,7 +297,7 @@ for idx in range(lastidx + 1):
                 # And subtract the dark
                 np.subtract(data, dark[0].data, out=data)
             # If we have flat, apply it
-            if len(flat) > 0:
+            if len(flatfiles) > 0:
                 data /= normflataccum
             # Process color channel
             # If making red, split out red channel
@@ -419,7 +418,22 @@ for idx in range(lastidx + 1):
                     accumulatorframe[footprint == False] += registered_image[footprint == False]
                     timeaccumcnt += 1
                 except (ValueError, aa.MaxIterError, IndexError, TypeError) as e:
-                    print("Error: Cannot find transform for file %s - %s (%s)" % (f, e.__class__, e))                         
+                    print("Error: Cannot find transform for file %s (%s)" % (f, e))                         
+                    # If first only, use new frame as start
+                    if timeaccumcnt == 1:
+                        accumfname = lfile
+                        mjdobs = mjdstart
+                        datestart = hduList[0].header['DATE-OBS']
+                        if 'FOVXREF' in hduList[0].header:
+                            fovxref = hduList[0].header['FOVXREF']
+                            fovyref = hduList[0].header['FOVYREF']
+                            fovra = hduList[0].header['FOVRA']
+                            fovdec = hduList[0].header['FOVDEC']
+                        timeaccumstart = mjdstart * 24 * 60 * 60
+                        firstframe = scaleUp(data, supersample)
+                        accumulatorframe = np.copy(firstframe)
+                        accumulatorcounts = np.ones(accumulatorframe.shape, dtype=np.int32)
+
         cnt = cnt + 1
     except OSError as e:
         print("Error: file %s - %s (%s)" % (f, e.__class__, e))     

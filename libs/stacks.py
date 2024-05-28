@@ -66,10 +66,13 @@ def buildMasterFlatStack(filedir: str, files: list, outfile: str, darkflat: fits
             mflat.writeto(os.path.join(filedir, outfile), overwrite=True)
         # And normalize the flat
         accum = accum.astype(np.float32)
+        #medi = [ [ np.median(accum[::2,::2]), np.median(accum[::2,1::2])],
+        #         [ np.median(accum[1::2,::2]), np.median(accum[1::2,1::2])] ]
+        #medi = np.tile(medi, (accum.shape[0]//2,accum.shape[1]//2))
         medi = np.median(accum)
         normflataccum = accum / medi
         # Handle any zero pixels (avoid divide by zero)
-        normflataccum[normflataccum == 0] = 1
+        normflataccum[normflataccum == 0] = 1.0
         #logger.info(f"normflataccum={normflataccum}")
     return normflataccum
 

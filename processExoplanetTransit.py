@@ -389,7 +389,7 @@ for f in lightfiles:
             if ('LONGITUD' in hduList[0].header) == False:
                 hduList[0].header.set('LONGITUD', obsLongitude, "longitude in degrees east of observing site")
             if calstat != "":
-                hdrList[0].header.set('CALSTAT', calstat)
+                hduList[0].header.set('CALSTAT', calstat)
             hduList[0].data = hduList[0].data.astype(img_dtype)
             hduList.writeto(newfits, overwrite=True)
         # if solved and we have target ra/dec, check it in field
