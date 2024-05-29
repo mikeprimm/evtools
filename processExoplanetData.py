@@ -267,7 +267,7 @@ lastidx = len(lightfiles) - 1
 bayerpat = None
 dateend = None
 fovxref = None
-blankcols = 0
+blankcols = None
 
 for idx in range(lastidx + 1):
     if (skipcnt > 0) and ((idx % skipcnt) != 0):
@@ -278,9 +278,17 @@ for idx in range(lastidx + 1):
         # Load file into list of HDU list 
         with fits.open(lfile) as hduList:
             data = hduList[0].data.astype(np.float64)
-            if 'INSTRUME' in hduList[0].header:
-                if hduList[0].header['INSTRUME'] == 'IMX224':
-                    blankcols = 4
+            if blankcols is None:
+                blankcols = 0
+                if 'INSTRUME' in hduList[0].header:
+                    if hduList[0].header['INSTRUME'] == 'IMX224':
+                        blankcols = 4
+                        if len(dark) > 0:
+                            dark[0].data = dark[0].data[:,4:]
+                        if len(flatfiles) > 0:
+                            normflataccum = normflataccum[:,4:]
+            if blankcols > 0:
+                data = data[:,blankcols:]
             if bayerpat is None:
                 if 'BAYERPAT' in hduList[0].header:
                     bayerpat = hduList[0].header['BAYERPAT']
@@ -300,8 +308,10 @@ for idx in range(lastidx + 1):
             # Process color channel
             # If making red, split out red channel
             if doBin:
-                hduList[0].header.set('FOVXREF', hduList[0].header['FOVXREF'] // 2)
-                hduList[0].header.set('FOVYREF', hduList[0].header['FOVYREF'] // 2)
+                if 'FOVXREF' in  hduList[0].header:
+                    hduList[0].header.set('FOVXREF', hduList[0].header['FOVXREF'] // 2)
+                if 'FOVYREF' in  hduList[0].header:
+                    hduList[0].header.set('FOVYREF', hduList[0].header['FOVYREF'] // 2)
                 if bayerpat == "RGGB":
                     if doRed:
                         data = data[::2,::2]
@@ -338,8 +348,6 @@ for idx in range(lastidx + 1):
                 # If making grayscale
                 elif doGray:
                     data = data @ np.array([ 0.2125, 0.7154, 0.0721 ]);
-                if blankcols > 0:
-                    data[:,0:4] = 0
             if 'BAYERPAT' in hduList[0].header:
                 hduList[0].header.remove('BAYERPAT')
             # And stack image
@@ -418,7 +426,7 @@ for idx in range(lastidx + 1):
                 mjdobs = mjdstart
                 datestart = hduList[0].header['DATE-OBS']
                 if 'FOVXREF' in hduList[0].header:
-                    fovxref = hduList[0].header['FOVXREF']
+                    fovxref = hduList[0].header['FOVXREF'] - ((blankcols//2) if doBin else blankcols) 
                     fovyref = hduList[0].header['FOVYREF']
                     fovra = hduList[0].header['FOVRA']
                     fovdec = hduList[0].header['FOVDEC']
