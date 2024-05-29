@@ -147,12 +147,6 @@ if args.flats:
     flatsrcdir = args.flats
 # Make output directory, if needed
 pathlib.Path(outputdir).mkdir(parents=True, exist_ok=True)
-if args.darkflats:
-   darkflatpath = os.path.join(outputdir, "darkflats")
-   pathlib.Path(darkflatpath).mkdir(parents=True, exist_ok=True)
-if args.flats:
-   flatpath = os.path.join(outputdir, "flats")
-   pathlib.Path(flatpath).mkdir(parents=True, exist_ok=True)
 stacktime = 120
 if args.stacktime:
     stacktime = int(args.stacktime)
@@ -273,6 +267,7 @@ lastidx = len(lightfiles) - 1
 bayerpat = None
 dateend = None
 fovxref = None
+blankcols = 0
 
 for idx in range(lastidx + 1):
     if (skipcnt > 0) and ((idx % skipcnt) != 0):
@@ -283,6 +278,9 @@ for idx in range(lastidx + 1):
         # Load file into list of HDU list 
         with fits.open(lfile) as hduList:
             data = hduList[0].data.astype(np.float64)
+            if 'INSTRUME' in hduList[0].header:
+                if hduList[0].header['INSTRUME'] == 'IMX224':
+                    blankcols = 4
             if bayerpat is None:
                 if 'BAYERPAT' in hduList[0].header:
                     bayerpat = hduList[0].header['BAYERPAT']
@@ -328,6 +326,7 @@ for idx in range(lastidx + 1):
                         print("gray not supported with binning")                    
             else:
                 data = demosaicing_CFA_Bayer_bilinear(data, bayerpat)
+                    
                 if doRed:
                     data = data @ np.array([ 1, 0, 0 ])
                 # If making green, split out green channels
@@ -339,7 +338,10 @@ for idx in range(lastidx + 1):
                 # If making grayscale
                 elif doGray:
                     data = data @ np.array([ 0.2125, 0.7154, 0.0721 ]);
-            hduList[0].header.remove('BAYERPAT')
+                if blankcols > 0:
+                    data[:,0:4] = 0
+            if 'BAYERPAT' in hduList[0].header:
+                hduList[0].header.remove('BAYERPAT')
             # And stack image
             if 'MJD-OBS' not in hduList[0].header:
                 offset = get_exp_time(hduList[0].header) / (24 * 60 * 60)
