@@ -259,8 +259,11 @@ firstframe = None
 accumulatorframe = None
 accumulatorcounts = None
 accumfname = None
-mjdobs = 0
+accummjdstart = 0
+accummjdend = 0
 mjdend = 0
+accumdatestart = None 
+accumdateend = None
 
 lastidx = len(lightfiles) - 1
 
@@ -364,19 +367,19 @@ for idx in range(lastidx + 1):
                 mjdend = hduList[0].header['MJD-END']
                 dateend = hduList[0].header['DATE-END']
             # If past end of our limit, or last image, flush
-            tobs = mjdend * 24 * 60 * 60  # MJD in seconds
+            tobs = mjdstart * 24 * 60 * 60  # MJD in seconds
             if (timeaccumcnt > 0) and (((timeaccumstart + stacktime) < tobs) or (idx == lastidx)):
                 if timeaccumcnt < stackmin:
-                    print(f"Skip frames from {mjdobs} to {mjdend}")
+                    print(f"Skip frames from {accummjdstart} to {accummjdend}")
                 else:
-                    print(f"Accumulated {timeaccumcnt} frames from {mjdobs} to {mjdend} into frame {stackedcnt}")
+                    print(f"Accumulated {timeaccumcnt} frames from {accummjdstart} to {accummjdend} into frame {stackedcnt}")
                     with fits.open(accumfname) as hduStackList:
-                        hduStackList[0].header.set("MJD-OBS", mjdobs)
-                        hduStackList[0].header.set("MJD-MID", (mjdobs + mjdend) / 2)
-                        hduStackList[0].header.set("MJD-END", mjdend)
-                        hduStackList[0].header.set("EXPTIME", (mjdend - mjdobs) * 24 * 3600)
-                        hduStackList[0].header.set("DATE-OBS", datestart)
-                        hduStackList[0].header.set("DATE-END", dateend)
+                        hduStackList[0].header.set("MJD-OBS", accummjdstart)
+                        hduStackList[0].header.set("MJD-MID", (accummjdstart + accummjdend) / 2)
+                        hduStackList[0].header.set("MJD-END", accummjdend)
+                        hduStackList[0].header.set("EXPTIME", (accummjdend - accummjdstart) * 24 * 3600)
+                        hduStackList[0].header.set("DATE-OBS", accumdatestart)
+                        hduStackList[0].header.set("DATE-END", accumdateend)
                         hduStackList[0].header.set("BZERO", 0)
                         hduStackList[0].header.set("BSCALE", 1)
                         hduStackList[0].header.set("FILTER", filter)
@@ -390,8 +393,8 @@ for idx in range(lastidx + 1):
                             hduStackList[0].header.set('CALSTAT', calstat)
                         if args.target:
                             hduStackList[0].header.set('OBJECT', args.target)
-                        stime = Time(datestart)
-                        etime = Time(dateend)
+                        stime = Time(accumdatestart)
+                        etime = Time(accumdateend)
                         mtime = Time((stime.jd + etime.jd) / 2, format="jd", scale="tt")
                         mtime.format = "isot"
                         hduStackList[0].header.set("DATE-AVG", mtime.to_string())
@@ -404,6 +407,8 @@ for idx in range(lastidx + 1):
                 timeaccumstart = 0
             # If at least one already accumulated
             if timeaccumcnt > 0:
+                accummjdend = mjdend
+                accumdateend = dateend
                 # Find transformed image to align with first one
                 try:
                     try:
@@ -423,8 +428,9 @@ for idx in range(lastidx + 1):
             # If first file of new accumulator, add it
             if timeaccumcnt == 0:
                 accumfname = lfile
-                mjdobs = mjdstart
-                datestart = hduList[0].header['DATE-OBS']
+                accummjdstart = mjdstart
+                accumdatestart = hduList[0].header['DATE-OBS']
+                accumdateend = dateend
                 if 'FOVXREF' in hduList[0].header:
                     fovxref = hduList[0].header['FOVXREF'] - ((blankcols//2) if doBin else blankcols) 
                     fovyref = hduList[0].header['FOVYREF']
