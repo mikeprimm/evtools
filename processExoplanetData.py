@@ -107,6 +107,7 @@ parser.add_argument('-r', "--red", action='store_true')
 parser.add_argument('-g', "--green", action='store_true')
 parser.add_argument('-b', "--blue", action='store_true')
 parser.add_argument("-G", "--gray", action='store_true')
+parser.add_argument("--irpass", action='store_true')
 parser.add_argument('-B', "--bin", action='store_true')
 parser.add_argument("-st", "--stacktime", help = "Number of seconds to stack (default 120)") 
 parser.add_argument("-sm", "--stackmin", help = "Minimum number of frames per stack (default 5)") 
@@ -164,6 +165,7 @@ doRed = False
 doGreen = False
 doBlue = False
 doGray = False
+doIRPass = False
 doBin = False
 filter = "V"
 calstat = ""
@@ -179,6 +181,10 @@ elif args.blue:
     doBlue = True
     filter = "B"
     print("Produce blue channel FITS files")
+elif args.irpass:
+    doIRPass = True
+    filter = "I"
+    print("Produce IR channel (IR pass filter) FITS files")
 else:
     doGreen = True
     filter = "V"
@@ -324,6 +330,8 @@ for idx in range(lastidx + 1):
                     # If making blue, split out blue channels
                     elif doBlue:
                         data = data[1::2,1::2]
+                    elif doIRPass:
+                        data = (data[::2,::2] + data[1::2,::2] + data[::2,1::2] + data[1::2,1::2]) / 4
                     else:
                         print("gray not supported with binning")                    
                 else:  # Assume GBRG
@@ -335,8 +343,12 @@ for idx in range(lastidx + 1):
                     # If making blue, split out blue channels
                     elif doBlue:
                         data = data[::2,1::2]
+                    elif doIRPass:
+                        data = (data[::2,::2] + data[1::2,::2] + data[::2,1::2] + data[1::2,1::2]) / 4
                     else:
-                        print("gray not supported with binning")                    
+                        print("gray not supported with binning")  
+            elif doIRPass:
+                pass                  
             else:
                 data = demosaicing_CFA_Bayer_bilinear(data, bayerpat)
                     
