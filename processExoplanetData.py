@@ -441,6 +441,7 @@ for idx in range(lastidx + 1):
             if timeaccumcnt == 0:
                 accumfname = lfile
                 accummjdstart = mjdstart
+                accummjdend = mjdend
                 accumdatestart = hduList[0].header['DATE-OBS']
                 accumdateend = dateend
                 if 'FOVXREF' in hduList[0].header:
