@@ -50,7 +50,7 @@ def runsolving(ra, dec, infile, outfile, cnt):
             "--radius", "5",
             # All Unistellar scopes are between 1 and 2 arcsec per pixel
             "--scale-low", "0.5",
-            "--scale-high", "2",
+            "--scale-high", "4",
              "--scale-units", "arcsecperpix",
             "--fits-image",
             "--new-fits", outfile ]

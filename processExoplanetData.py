@@ -395,7 +395,8 @@ for idx in range(lastidx + 1):
                         hduStackList[0].header.set("BZERO", 0)
                         hduStackList[0].header.set("BSCALE", 1)
                         hduStackList[0].header.set("FILTER", filter)
-                        hduStackList[0].header.remove("BAYERPAT")
+                        if 'BAYERPAT' in hduStackList[0].header:
+                            hduStackList[0].header.remove("BAYERPAT")
                         if fovxref is not None:
                             hduStackList[0].header.set('FOVXREF', fovxref)
                             hduStackList[0].header.set('FOVYREF', fovyref)
