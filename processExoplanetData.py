@@ -28,6 +28,14 @@ except ImportError:
 from barycorrpy import utc_tdb
 from pandas import isna
 
+# Color channels
+filterID = [ "R", "V", "B", "I", "CV" ]
+COLOR_RED = filterID.index("R")
+COLOR_GREEN = filterID.index("V")
+COLOR_BLUE = filterID.index("B")
+COLOR_IR = filterID.index("I")
+COLOR_GRAY = filterID.index("CV")
+
 warnings.simplefilter('ignore', category=FITSFixedWarning)
 
 
@@ -77,6 +85,54 @@ def scaleDown(ary: np.array, scale: int, dtype: np.dtype):
     rslt /= (scale * scale)
     return rslt
 
+def makeColorChannel(data: np.array, color: int, bin: bool, bayerpat: str):
+    newdata = None
+
+    # If doing 2x2 binning
+    if doBin:
+        if bayerpat == "RGGB":
+            if color == COLOR_RED:
+                newdata = data[::2,::2]
+            # If making green, split out green channels
+            elif color == COLOR_GREEN:
+                newdata = (data[1::2,::2] + data[::2,1::2]) / 2
+            # If making blue, split out blue channels
+            elif color == COLOR_BLUE:
+                newdata = data[1::2,1::2]
+            elif color == COLOR_IR:
+                newdata = (data[::2,::2] + data[1::2,::2] + data[::2,1::2] + data[1::2,1::2]) / 4
+            else:
+                print("gray not supported with binning")                    
+        else:  # Assume GBRG
+            if color == COLOR_RED:
+                newdata = data[1::2,::2]
+            # If making green, split out green channels
+            elif color == COLOR_GREEN:
+                newdata = (data[::2,::2] + data[1::2,1::2]) / 2
+            # If making blue, split out blue channels
+            elif color == COLOR_BLUE:
+                newdata = data[::2,1::2]
+            elif color == COLOR_IR:
+                newdata = (data[::2,::2] + data[1::2,::2] + data[::2,1::2] + data[1::2,1::2]) / 4
+            else:
+                print("gray not supported with binning")  
+    elif color == COLOR_IR:
+        newdata = np.copy(data)
+    else:
+        newdata = demosaicing_CFA_Bayer_bilinear(data, bayerpat)
+        if color == COLOR_RED:
+            newdata = newdata @ np.array([ 1, 0, 0 ])
+        # If making green, split out green channels
+        elif color == COLOR_GREEN:
+            newdata = newdata @ np.array([ 0, 1, 0 ])
+        # If making blue, split out blue channels
+        elif color == COLOR_BLUE:
+            newdata = newdata @ np.array([ 0, 0, 1 ])
+        # If making grayscale
+        elif color == COLOR_GRAY:
+            newdata = newdata @ np.array([ 0.2125, 0.7154, 0.0721 ]);
+    return newdata
+
 # create logger
 logger = logging.getLogger('processExoplanetData')
 logger.setLevel(logging.DEBUG)
@@ -124,7 +180,7 @@ if args.output:
     outputdir = args.output
 basename = 'stack'
 if args.target:
-    basename = args.target
+    basename = args.target.replace(' ', '-')
 # Add file logger
 pathlib.Path(outputdir).mkdir(parents=True, exist_ok=True)
 ch2 = logging.FileHandler(os.path.join(outputdir, 'processExoplanetData.log'), encoding='utf-8', mode='w')
@@ -161,33 +217,26 @@ skipcnt = 1
 if args.skip:
     skipcnt = int(args.skip) 
 
-doRed = False
-doGreen = False
-doBlue = False
-doGray = False
-doIRPass = False
 doBin = False
-filter = "V"
+filters = []
 calstat = ""
 if args.red:
-    doRed = True
-    filter = "R"
+    filters.append(COLOR_RED);
     print("Produce red channel FITS files")
-elif args.gray:
-    doGray = True
-    filter = "CV"
+if args.green:
+    filters.append(COLOR_GREEN)
+    print("Produce green channel FITS files")
+if args.gray:
+    filters.append(COLOR_GRAY)
     print("Produce grayscale channel FITS files")
-elif args.blue:
-    doBlue = True
-    filter = "B"
+if args.blue:
+    filters.append(COLOR_BLUE)
     print("Produce blue channel FITS files")
-elif args.irpass:
-    doIRPass = True
-    filter = "I"
+if args.irpass:
+    filters.append(COLOR_IR)
     print("Produce IR channel (IR pass filter) FITS files")
-else:
-    doGreen = True
-    filter = "V"
+if len(filters) == 0:
+    filters.append(COLOR_GREEN)
     print("Produce green channel FITS files")
 if args.bin:
     doBin = True
@@ -262,8 +311,9 @@ timeaccumcnt = 0
 timeaccumstart = 0
 timeaccumlast = 0
 firstframe = None
-accumulatorframe = None
-accumulatorcounts = None
+dataframe = [ None ] * len(filterID)
+accumulatorframe = [ None ] * len(filterID)
+accumulatorcounts = [ None ] * len(filterID)
 accumfname = None
 accummjdstart = 0
 accummjdend = 0
@@ -314,58 +364,19 @@ for idx in range(lastidx + 1):
             # If we have flat, apply it
             if len(flatfiles) > 0:
                 np.divide(data, normflataccum, out=data)
-            # Process color channel
-            # If making red, split out red channel
+            # Process color channels
+            for filter in filters:
+                dataframe[filter] = makeColorChannel(data, filter, doBin, bayerpat)
+            # If binning, adjust POVXREF/POVYREF
             if doBin:
                 if 'FOVXREF' in  hduList[0].header:
                     hduList[0].header.set('FOVXREF', hduList[0].header['FOVXREF'] // 2)
                 if 'FOVYREF' in  hduList[0].header:
                     hduList[0].header.set('FOVYREF', hduList[0].header['FOVYREF'] // 2)
-                if bayerpat == "RGGB":
-                    if doRed:
-                        data = data[::2,::2]
-                    # If making green, split out green channels
-                    elif doGreen:
-                        data = (data[1::2,::2] + data[::2,1::2]) / 2
-                    # If making blue, split out blue channels
-                    elif doBlue:
-                        data = data[1::2,1::2]
-                    elif doIRPass:
-                        data = (data[::2,::2] + data[1::2,::2] + data[::2,1::2] + data[1::2,1::2]) / 4
-                    else:
-                        print("gray not supported with binning")                    
-                else:  # Assume GBRG
-                    if doRed:
-                        data = data[1::2,::2]
-                    # If making green, split out green channels
-                    elif doGreen:
-                        data = (data[::2,::2] + data[1::2,1::2]) / 2
-                    # If making blue, split out blue channels
-                    elif doBlue:
-                        data = data[::2,1::2]
-                    elif doIRPass:
-                        data = (data[::2,::2] + data[1::2,::2] + data[::2,1::2] + data[1::2,1::2]) / 4
-                    else:
-                        print("gray not supported with binning")  
-            elif doIRPass:
-                pass                  
-            else:
-                data = demosaicing_CFA_Bayer_bilinear(data, bayerpat)
-                    
-                if doRed:
-                    data = data @ np.array([ 1, 0, 0 ])
-                # If making green, split out green channels
-                elif doGreen:
-                    data = data @ np.array([ 0, 1, 0 ])
-                # If making blue, split out blue channels
-                elif doBlue:
-                    data = data @ np.array([ 0, 0, 1 ])
-                # If making grayscale
-                elif doGray:
-                    data = data @ np.array([ 0.2125, 0.7154, 0.0721 ]);
+            # Remove bayer pattern header
             if 'BAYERPAT' in hduList[0].header:
                 hduList[0].header.remove('BAYERPAT')
-            # And stack image
+            # And get image timing
             if 'MJD-OBS' not in hduList[0].header:
                 offset = get_exp_time(hduList[0].header) / (24 * 60 * 60)
                 mjdmid = ut_date(hduList[0].header, "DATE-OBS", "EXPOSURE")
@@ -394,7 +405,6 @@ for idx in range(lastidx + 1):
                         hduStackList[0].header.set("DATE-END", accumdateend)
                         hduStackList[0].header.set("BZERO", 0)
                         hduStackList[0].header.set("BSCALE", 1)
-                        hduStackList[0].header.set("FILTER", filter)
                         if 'BAYERPAT' in hduStackList[0].header:
                             hduStackList[0].header.remove("BAYERPAT")
                         if fovxref is not None:
@@ -411,9 +421,12 @@ for idx in range(lastidx + 1):
                         mtime = Time((stime.jd + etime.jd) / 2, format="jd", scale="tt")
                         mtime.format = "isot"
                         hduStackList[0].header.set("DATE-AVG", mtime.to_string())
-                        accumulatorframe /= accumulatorcounts
-                        hduStackList[0].data = scaleDown(accumulatorframe, supersample, np.float32)
-                        hduStackList.writeto(os.path.join(outputdir, "{0}-{1}-{2:05d}-{3}.fits".format(basename,filter, stackedcnt, mtime.mjd)), overwrite=True)
+                        mtimetxt = mtime.strftime('%Y%m%dT%H%M%S.%f')
+                        for filter in filters:
+                            hduStackList[0].header.set("FILTER", filterID[filter])
+                            accumulatorframe[filter] /= accumulatorcounts[filter]
+                            hduStackList[0].data = scaleDown(accumulatorframe[filter], supersample, np.float32)
+                            hduStackList.writeto(os.path.join(outputdir, "{0}-{1}-{2:05d}-{3}.fits".format(basename, filterID[filter], stackedcnt, mtimetxt)), overwrite=True)
                     stackedcnt = stackedcnt + 1
                 # Reset accumulator
                 timeaccumcnt = 0
@@ -424,13 +437,19 @@ for idx in range(lastidx + 1):
                 accumdateend = dateend
                 # Find transformed image to align with first one
                 try:
+                    # Prefer green (brightest), else use first filter
+                    refimg = dataframe[COLOR_GREEN]
+                    if refimg is None:
+                        refimg = dataframe[filters[0]]
                     try:
-                        registered_image, footprint = aa.register(data, firstframe)
+                        trans, _ = aa.find_transform(refimg, firstframe)
                     except aa.MaxIterError:
-                        registered_image, footprint = aa.register(data, firstframe, detection_sigma=2, min_area=9)
-
-                    accumulatorcounts[footprint == False] += 1
-                    accumulatorframe[footprint == False] += registered_image[footprint == False]
+                        trans, _ = aa.find_transform(refimg, firstframe, detection_sigma=2, min_area=9)
+                    # And use for all filters
+                    for filter in filters:
+                        registered_image, footprint = aa.apply_transform(trans, refimg, firstframe)
+                        accumulatorcounts[filter][footprint == False] += 1
+                        accumulatorframe[filter][footprint == False] += registered_image[footprint == False]
                     timeaccumcnt += 1
                 except (ValueError, aa.MaxIterError, IndexError, TypeError) as e:
                     print("Error: Cannot find transform for file %s (%s)" % (f, e))                         
@@ -451,9 +470,14 @@ for idx in range(lastidx + 1):
                     fovra = hduList[0].header['FOVRA']
                     fovdec = hduList[0].header['FOVDEC']
                 timeaccumstart = mjdstart * 24 * 60 * 60
-                firstframe = scaleUp(data, supersample)
-                accumulatorframe = np.copy(firstframe)
-                accumulatorcounts = np.ones(accumulatorframe.shape, dtype=np.int32)
+                # Prefer green (brightest), else use first filter
+                refimg = dataframe[COLOR_GREEN]
+                if refimg is None:
+                    refimg = dataframe[filters[0]]
+                firstframe = scaleUp(refimg, supersample)
+                for filter in filters:
+                    accumulatorframe[filter] = scaleUp(dataframe[filter], supersample)
+                    accumulatorcounts[filter] = np.ones(accumulatorframe[filter].shape, dtype=np.int32)
                 timeaccumcnt += 1
         cnt = cnt + 1
     except OSError as e:
