@@ -102,7 +102,7 @@ def makeColorChannel(data: np.array, color: int, bin: bool, bayerpat: str):
             elif color == COLOR_IR:
                 newdata = (data[::2,::2] + data[1::2,::2] + data[::2,1::2] + data[1::2,1::2]) / 4
             else:
-                print("gray not supported with binning")                    
+                logger.warning("gray not supported with binning")                    
         else:  # Assume GBRG
             if color == COLOR_RED:
                 newdata = data[1::2,::2]
@@ -115,7 +115,7 @@ def makeColorChannel(data: np.array, color: int, bin: bool, bayerpat: str):
             elif color == COLOR_IR:
                 newdata = (data[::2,::2] + data[1::2,::2] + data[::2,1::2] + data[1::2,1::2]) / 4
             else:
-                print("gray not supported with binning")  
+                logger.warning("gray not supported with binning")  
     elif color == COLOR_IR:
         newdata = np.copy(data)
     else:
@@ -222,25 +222,25 @@ filters = []
 calstat = ""
 if args.red:
     filters.append(COLOR_RED);
-    print("Produce red channel FITS files")
+    logger.info("Produce red channel FITS files")
 if args.green:
     filters.append(COLOR_GREEN)
-    print("Produce green channel FITS files")
+    logger.info("Produce green channel FITS files")
 if args.gray:
     filters.append(COLOR_GRAY)
-    print("Produce grayscale channel FITS files")
+    logger.info("Produce grayscale channel FITS files")
 if args.blue:
     filters.append(COLOR_BLUE)
-    print("Produce blue channel FITS files")
+    logger.info("Produce blue channel FITS files")
 if args.irpass:
     filters.append(COLOR_IR)
-    print("Produce IR channel (IR pass filter) FITS files")
+    logger.info("Produce IR channel (IR pass filter) FITS files")
 if len(filters) == 0:
     filters.append(COLOR_GREEN)
-    print("Produce green channel FITS files")
+    logger.info("Produce green channel FITS files")
 if args.bin:
     doBin = True
-    print("2x2 bin files (1/2 resolution)")
+    logger.info("2x2 bin files (1/2 resolution)")
 
 darkfiles = []
 # Go through the darks
@@ -354,7 +354,7 @@ for idx in range(lastidx + 1):
                     bayerpat = bayerpat[0:4]
                 else:
                     bayerpat = "RGGB"
-                print(f"Bayer pattern={bayerpat}")
+                logger.info(f"Bayer pattern={bayerpat}")
             # First, calibrate image
             if len(dark) > 0:
                 # Clamp the data with the dark from below, so we can subtract without rollover
@@ -393,9 +393,9 @@ for idx in range(lastidx + 1):
             tobs = mjdstart * 24 * 60 * 60  # MJD in seconds
             if (timeaccumcnt > 0) and (((timeaccumstart + stacktime) < tobs) or (idx == lastidx)):
                 if timeaccumcnt < stackmin:
-                    print(f"Skip frames from {accummjdstart} to {accummjdend}")
+                    logger.info(f"Skip frames from {accummjdstart} to {accummjdend}")
                 else:
-                    print(f"Accumulated {timeaccumcnt} frames from {accummjdstart} to {accummjdend} into frame {stackedcnt}")
+                    logger.info(f"Accumulated {timeaccumcnt} frames from {accummjdstart} to {accummjdend} into frame {stackedcnt}")
                     with fits.open(accumfname) as hduStackList:
                         hduStackList[0].header.set("MJD-OBS", accummjdstart)
                         hduStackList[0].header.set("MJD-MID", (accummjdstart + accummjdend) / 2)
@@ -447,15 +447,15 @@ for idx in range(lastidx + 1):
                         trans, _ = aa.find_transform(refimg, firstframe, detection_sigma=2, min_area=9)
                     # And use for all filters
                     for filter in filters:
-                        registered_image, footprint = aa.apply_transform(trans, refimg, firstframe)
+                        registered_image, footprint = aa.apply_transform(trans, dataframe[filter], firstframe)
                         accumulatorcounts[filter][footprint == False] += 1
                         accumulatorframe[filter][footprint == False] += registered_image[footprint == False]
                     timeaccumcnt += 1
                 except (ValueError, aa.MaxIterError, IndexError, TypeError) as e:
-                    print("Error: Cannot find transform for file %s (%s)" % (f, e))                         
+                    logger.warning("Error: Cannot find transform for file %s (%s)" % (f, e))                         
                     # If first only, use new frame as start
                     if timeaccumcnt == 1:
-                        print("Skip previous frame")                         
+                        logger.info("Skip previous frame")                         
                         timeaccumcnt = 0
             # If first file of new accumulator, add it
             if timeaccumcnt == 0:
@@ -481,7 +481,7 @@ for idx in range(lastidx + 1):
                 timeaccumcnt += 1
         cnt = cnt + 1
     except OSError as e:
-        print("Error: file %s - %s (%s)" % (f, e.__class__, e))     
+        logger.error("Error: file %s - %s (%s)" % (f, e.__class__, e))     
 
 logger.info("Processed %d out of %d files into destination '%s'" % (cnt, len(lightfiles), outputdir))
 
