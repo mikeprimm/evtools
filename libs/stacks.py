@@ -4,6 +4,14 @@ import logging
 from astropy.io import fits
 import numpy as np
 
+# Fix raw data if needed (workaround for bad Unistellar export)
+def getDataBuffer(hduList: fits.HDUList):
+    data = hduList[0].data
+    if 'SOFTVER' in hduList[0].header:
+        if hduList[0].header['SOFTVER'] == '4.1-6ded42a5':
+            np.multiply(data, 2, out=data)
+    return data
+
 # Build median-based stacked fits HDU from given files
 def buildMedianStack(filedir: str, files: list, outfile: str):
     stack = None
@@ -14,11 +22,12 @@ def buildMedianStack(filedir: str, files: list, outfile: str):
                 dfile = os.path.join(filedir, f)
                 # Load file into list of HDU list 
                 with fits.open(dfile) as hduList:
+                    data = getDataBuffer(hduList)
                     # Use first one as base
                     if len(stack) == 0:
-                        accum = np.zeros((0,) + hduList[0].data.shape)
+                        accum = np.zeros((0,) + data.shape)
                         stack.append(hduList[0].copy())
-                    accum = np.append(accum, [ hduList[0].data ], axis=0)
+                    accum = np.append(accum, [ data ], axis=0)
             except OSError:
                 logging.error("Error: file %s" % f)        
         # Now compute median for each pixel
@@ -45,11 +54,12 @@ def buildMasterFlatStack(filedir: str, files: list, outfile: str, darkflat: fits
                 dfile = os.path.join(filedir, f)
                 # Load file into list of HDU list 
                 with fits.open(dfile) as hduList:
+                    data = getDataBuffer(hduList)
                     # Use first one as base
                     if len(mflat) == 0:
-                        accum = np.zeros((0,) + hduList[0].data.shape)
+                        accum = np.zeros((0,) + data.shape)
                         mflat.append(hduList[0].copy())
-                    accum = np.append(accum, [ hduList[0].data ], axis=0)
+                    accum = np.append(accum, [ data ], axis=0)
             except OSError:
                 logging.error("Error: file %s" % f)        
         # Now compute median for each pixel

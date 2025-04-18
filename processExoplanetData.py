@@ -16,9 +16,9 @@ from colour_demosaicing import demosaicing_CFA_Bayer_bilinear
 import dateutil.parser as dup
 
 try:
-    from .libs.stacks import buildMedianStack, buildMasterFlatStack
+    from .libs.stacks import buildMedianStack, buildMasterFlatStack, getDataBuffer
 except ImportError:  # package import
-    from libs.stacks import buildMedianStack, buildMasterFlatStack
+    from libs.stacks import buildMedianStack, buildMasterFlatStack, getDataBuffer
 try:
     from .libs.exofop import exofop_getcompositeinfo, exofop_getticid
 except ImportError: 
@@ -336,7 +336,7 @@ for idx in range(lastidx + 1):
         lfile = os.path.join(sciencesrcdir, f)
         # Load file into list of HDU list 
         with fits.open(lfile) as hduList:
-            data = hduList[0].data.astype(np.float64)
+            data = getDataBuffer(hduList).astype(np.float64)
             if blankcols is None:
                 blankcols = 0
                 if 'INSTRUME' in hduList[0].header:
