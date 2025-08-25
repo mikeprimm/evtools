@@ -3,7 +3,7 @@ from genericpath import isfile
 import os
 import logging
 from astropy.time import Time
-from datetime import datetime
+from datetime import datetime, UTC
 from math import log10, floor
 import astropy.units as u
 from astropy.coordinates import SkyCoord, EarthLocation, AltAz
@@ -50,9 +50,9 @@ if args.target:
     if tic:
         skypos, vmag = exofop_getcompositeinfo(tic)
         # Adjust for proper motion (milliarcsec to degrees)
-        curpos = skypos.apply_space_motion(new_obstime = Time(datetime.utcnow(), scale='utc'))
+        curpos = skypos.apply_space_motion(new_obstime = Time(datetime.now(UTC), scale='utc'))
     else:
-        logger.error("Tsrget not found")
+        logger.error("Target not found")
         exit(1)
     exofop_getparameters(tic)
 elif args.dec and args.ra and args.mag:
@@ -70,6 +70,8 @@ bestgain, exptime = unistellarBestGainAndExp(vmag)
 logger.info(f"Unistellar: best gain = {bestgain} db, exposure time = {exptime} ms")
 if bestgain is None:
     exit(1)
+elif bestgain == 35:
+    logger.warning("Gain is at or exceeding recommended gain ceiling (35dB), so it has been reset to 35dB to prevent saturation. If this target is too faint (>15 Vmag), it may not be visible or require very long stack times")
 url = f"unistellar://science/transit?ra={curpos.ra.deg:.5f}&dec={curpos.dec.deg:.5f}&c=3970&et={exptime}&g={bestgain}&d={int(10)}"
 logger.info(f"Unistellar URL (for 10 seconds): {url}")
 url = f"unistellar://science/transit?ra={curpos.ra.deg:.5f}&dec={curpos.dec.deg:.5f}&c=3970&et={exptime}&g={bestgain}&d={int(duration * 3600)}"

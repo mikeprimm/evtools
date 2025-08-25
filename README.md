@@ -1,4 +1,4 @@
-# Tools for Citizen Science related processing with Unistellar EVScopes
+# Modified tools for Citizen Science related processing of Exoplanets (original from Mike Primm)
 
 ## How to set up
 The needed dependencies for these tools are in the provided requirements.txt.  To install these, proceed as normal for your python environment.  Typically this would be done via:

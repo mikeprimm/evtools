@@ -17,7 +17,11 @@ fluxChangeFactor = 1.122 ** deltaGain
 def unistellarFluxFromBaseFactor(vmag, exptime):
     return (10 ** ((vmag - baselineVmag)/-2.5)) * (float(exptime)/baselineExp)
 def unistellarMaxGain(vmag, exptime):
-    return baselineGain - (log10(unistellarFluxFromBaseFactor(vmag, exptime))/log10(1.122))
+    g = baselineGain - (log10(unistellarFluxFromBaseFactor(vmag, exptime))/log10(1.122))
+    if g >= 35:
+        return 36
+    else:
+        return g
 def unistellarBestGain(vmag, exptime):
     return floor(unistellarMaxGain(vmag, exptime)) - 1
 def unistellarBestGainAndExp(vmag):

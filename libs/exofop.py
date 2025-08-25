@@ -25,42 +25,53 @@ def exofop_getticid(tgtname):
         logging.error(f"EXOFOP error: ${e}")
         return None
 
+def safe_float(x):
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return None
+
+def _get_vmag(data):
+    for m in data.get("magnitudes", []):
+        band = (m.get("band") or "").strip().lower()
+        if band == "v":
+            v = safe_float(m.get("value"))
+            if v is not None:
+                return v
+    return None
+
 @retry(stop=stop_after_delay(30))
 def exofop_getcompositeinfo(tic):
     try:
-        url = f"https://exofop.ipac.caltech.edu/tess/download_target.php?id={tic}"
-        result = requests.get(url)
-        rsp = result.text.splitlines()
-        ra2015 = None
-        dec2015 = None
-        pra = None
-        pdec = None
-        vmag = None
-        for line in rsp:
-            if line.startswith("RA (J2015.5)"):
-                sline = line[12:].strip().split(" ")
-                ra2015 = float(sline[2])
-            elif line.startswith("Dec (J2015.5)"):
-                sline = line[13:].strip().split(" ")
-                dec2015 = float(sline[2])
-            elif line.startswith("Proper Motion RA (mas/yr)"):
-                sline = line[25:].strip().split(" ")
-                pra = float(sline[0])
-            elif line.startswith("Proper Motion Dec (mas/yr)"):
-                sline = line[26:].strip().split(" ")
-                pdec = float(sline[0])
-            elif line.startswith("V     "):
-                sline = line[6:].strip().split(" ")
-                vmag = float(sline[0])
-        skycoord = SkyCoord(ra=ra2015*u.deg, 
-                          dec=dec2015*u.deg,
-                          distance=1*u.mpc, # Far enough to ignore parallax
-                          pm_ra_cosdec=pra*u.mas/u.yr,
-                          pm_dec=pdec*u.mas/u.yr,
-                          obstime=Time('J2015.5'))                
+        url = f"https://exofop.ipac.caltech.edu/tess/target.php?id={tic}&json"
+        result = requests.get(url, timeout=15)
+        result.raise_for_status()
+        rsp = result.json()
+        coords = rsp.get("coordinates", {})
+        ra2015 = safe_float(coords.get("ra"))
+        dec2015 = safe_float(coords.get("dec"))
+        pra = safe_float(coords.get("pm_ra"))
+        pdec = safe_float(coords.get("pm_dec"))
+        if None in (ra2015, dec2015, pra, pdec):
+            raise ValueError("Missing or invalid RA/Dec/PM fields in EXOFOP JSON.")
+        dist_pc = None
+        for sp in rsp.get("stellar_parameters", []):
+            dist_pc = safe_float(sp.get("dist"))
+            if dist_pc is not None:
+                break
+        distance = (dist_pc * u.pc) if dist_pc is not None else (1 * u.mpc)
+        vmag = _get_vmag(rsp)
+        skycoord = SkyCoord(
+            ra=ra2015 * u.deg,
+            dec=dec2015 * u.deg,
+            distance=distance,
+            pm_ra_cosdec=pra * u.mas / u.yr,
+            pm_dec=pdec * u.mas / u.yr,
+            obstime=Time("J2015.5")
+        )
         return skycoord, vmag
     except Exception as e:
-        logging.error(f"EXOFOP error: {e}")
+        logging.error(f"EXOFOP error for TIC {tic}: {e}")
         return None, None
 
 @retry(stop=stop_after_delay(30))
