@@ -28,38 +28,26 @@ def exofop_getticid(tgtname):
 @retry(stop=stop_after_delay(30))
 def exofop_getcompositeinfo(tic):
     try:
-        url = f"https://exofop.ipac.caltech.edu/tess/download_target.php?id={tic}"
+        url = f"https://exofop.ipac.caltech.edu/tess/target.php?id={tic}&json"
         result = requests.get(url)
-        rsp = result.text.splitlines()
-        ra2015 = None
-        dec2015 = None
-        pra = None
-        pdec = None
+        rsp = result.json()
+        ra2015 = float(rsp['coordinates']['ra']) 
+        dec2015 = float(rsp['coordinates']['dec'])
+        pra = float(rsp['coordinates']['pm_ra'])
+        pdec = float(rsp['coordinates']['pm_dec'])
         vmag = None
-        for line in rsp:
-            if line.startswith("RA (J2015.5)"):
-                sline = line[12:].strip().split(" ")
-                ra2015 = float(sline[2])
-            elif line.startswith("Dec (J2015.5)"):
-                sline = line[13:].strip().split(" ")
-                dec2015 = float(sline[2])
-            elif line.startswith("Proper Motion RA (mas/yr)"):
-                sline = line[25:].strip().split(" ")
-                pra = float(sline[0])
-            elif line.startswith("Proper Motion Dec (mas/yr)"):
-                sline = line[26:].strip().split(" ")
-                pdec = float(sline[0])
-            elif line.startswith("V     "):
-                sline = line[6:].strip().split(" ")
-                vmag = float(sline[0])
+        for mag in rsp['magnitudes']:
+           if mag['band'] == "V":
+               vmag = float(mag['value'])
         skycoord = SkyCoord(ra=ra2015*u.deg, 
                           dec=dec2015*u.deg,
                           distance=1*u.mpc, # Far enough to ignore parallax
                           pm_ra_cosdec=pra*u.mas/u.yr,
                           pm_dec=pdec*u.mas/u.yr,
-                          obstime=Time('J2015.5'))                
+                          obstime=Time('J2015.5'))   
         return skycoord, vmag
     except Exception as e:
+        print(f"ERROR %s" % e)
         logging.error(f"EXOFOP error: {e}")
         return None, None
 

@@ -3,10 +3,10 @@ from genericpath import isfile
 import os
 import logging
 from astropy.time import Time
-from datetime import datetime
+from datetime import datetime, UTC
 from math import log10, floor
 import astropy.units as u
-from astropy.coordinates import SkyCoord, EarthLocation, AltAz
+from astropy.coordinates import SkyCoord, EarthLocation, AltAz, FK4, FK5
 try:
     from .libs.unistellar import unistellarBestGainAndExp, unstellarExoplanetURL
 except ImportError:  # package import
@@ -50,11 +50,10 @@ if args.target:
     if tic:
         skypos, vmag = exofop_getcompositeinfo(tic)
         # Adjust for proper motion (milliarcsec to degrees)
-        curpos = skypos.apply_space_motion(new_obstime = Time(datetime.utcnow(), scale='utc'))
+        curpos = skypos.apply_space_motion(new_obstime = Time(datetime.now(UTC), scale='utc'))
     else:
         logger.error("Tsrget not found")
         exit(1)
-    exofop_getparameters(tic)
 elif args.dec and args.ra and args.mag:
     skypos = SkyCoord(args.ra, args.dec, frame='icrs', unit=(u.hourangle, u.deg))
     vmag = float(args.mag)
@@ -66,6 +65,14 @@ else:
 logger.info(f"J2000, epoch J2015.5: RA/Dec={skypos.to_string('hmsdms')}")
 logger.info(f"Current RA/Dec={curpos.to_string('hmsdms')}")
 logger.info(f"V (mag) = {vmag}")
+
+j2000pos = curpos.to_string('hmsdms')
+_J2000coords = [j2000pos, j2000pos.replace(":"," ")]
+
+# The logic (Conversion)
+_fk5 = FK5(equinox=Time(Time(datetime.now(UTC), scale='utc').jd, format="jd", scale="utc"))
+_jNow = SkyCoord(_J2000coords, frame=FK4, unit=(u.hourangle, u.deg)).transform_to(_fk5)
+
 bestgain, exptime = unistellarBestGainAndExp(vmag)
 logger.info(f"Unistellar: best gain = {bestgain} db, exposure time = {exptime} ms")
 if bestgain is None:
@@ -74,3 +81,9 @@ url = f"unistellar://science/transit?ra={curpos.ra.deg:.5f}&dec={curpos.dec.deg:
 logger.info(f"Unistellar URL (for 10 seconds): {url}")
 url = f"unistellar://science/transit?ra={curpos.ra.deg:.5f}&dec={curpos.dec.deg:.5f}&c=3970&et={exptime}&g={bestgain}&d={int(duration * 3600)}"
 logger.info(f"Unistellar URL (for {duration} hours): {url}")
+
+result = _jNow[0].to_string('hmsdms').replace("h", "h ")
+result = result.replace("m", "m ")
+result = result.replace("d", "d ")
+logger.info("JNow (RA,Dec): %s \n" % (result))
+
